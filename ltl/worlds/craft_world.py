@@ -21,8 +21,7 @@ import yaml
 import json
 import pickle
 
-ROOT_PATH = "/storage/czw/ltl-rl/ltl/worlds/"
-#ROOT_PATH = "/storage/ylkuo/ltl-parser/ltl/worlds/"
+ROOT_PATH = "/storage/czw/ltl-rl/ltl/worlds/" #TODO adjust this
 
 def neighbors(pos, width, height, dir=None):
     x, y = pos
@@ -1087,55 +1086,15 @@ if __name__ == '__main__':
     args.target_fps = 60
     args.use_gui = True
     args.is_headless = False
-    args.formula = "( G ( tree ) )"#NOTE dummy
+    args.formula = "( G ( tree ) )"#NOTE dummy formula
     args.prefix_reward_decay = 0.8
-    args.update_failed_trans_only = False#TODO ask yen-ling
-
-    with open('/storage/czw/ltl-rl/ltl/czw_test') as f:
-        ltl = json.load(f)
-
-    for example_idx in range(len(ltl["data"])):
-    #for example_idx in range(1,2):
-        example = ltl["data"][example_idx]
-        print(example["sentence"])
-        print(example["formula"])
-        for env_idx in range(0,10):
-            env_i = example["envs"][env_idx]
-            tracks = example["actions"][env_idx]
-            for track_idx in range(0,1):
-                grid = np.array(env_i["init_grid"])
-                grid = np.array(grid).astype(int)
-                width, height = grid.shape
-                cookbook = Cookbook(args.recipe_path)
-                one_hot_grid = one_hot(grid, cookbook.n_kinds+1)
-                env_data = [one_hot_grid, tuple(env_i["init_pos"]), env_i["init_dir"]]
-
-                args.formula = example["rewritten_formula"]
-                env = sample_craft_env_each(args, env_data=env_data, width=width, height=height)
-
-                track = tracks["steps"][track_idx]
-                track.append(0)#move_first=False, so this doesn't matter
-
-                count = 0
-                #print(args.formula)
-                env, actions = sample_craft_env(args, env_data=None, width=width, height=height, max_n_seq=100)
-                #exit()
-                #while True:
-                #    env.gui.draw(move_first=True)
-                #    feature = env.feature()
-                #    #print(feature)
-                #    img = feature[3]
-                #    #print(type(img))
-                #    #Path(f'videos/czw_test/').mkdir(parents=True, exist_ok=True)
-                #    #img.save(f'videos/czw_test/{count:03}.png')
-                #    count += 1
-
-                for i in range(len(track)):
-                    move_idx = track[i]
-                    env.gui.draw(move_idx=move_idx, move_first=False)
-                    feature = env.feature()
-                    img = feature[3]
-                    Path(f'videos/{example_idx}/{env_idx}/{track_idx}').mkdir(parents=True, exist_ok=True)
-                    img.save(f'videos/{example_idx}/{env_idx}/{track_idx}/{i:03}.png')
-                    env.gui.move(move_idx)
-
+    args.update_failed_trans_only = False
+    args.return_screen = False
+    env, actions = sample_craft_env(args, n_steps=3)
+    if env is None: exit()
+    env.ba.draw('tmp_images/ba.svg', show=False)
+    while True:
+        env.gui.draw(move_first=True)
+        feature = env.feature()
+        img = Image.fromarray(feature[0])
+        img.save('tmp_images/feature.png')
