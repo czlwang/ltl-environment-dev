@@ -1,0 +1,25 @@
+environment:
+  - flag
+  - house
+  - tree
+  - apple_bin
+  - pear_bin
+  - orange_bin
+
+primitives:
+  - apple
+  - pear
+  - orange
+
+recipes:
+  apple_none:
+    apple: 1
+    _at: apple_bin
+
+  pear_none:
+    pear: 1
+    _at: pear_bin
+
+  orange_none:
+    orange: 1
+    _at: orange_bin
