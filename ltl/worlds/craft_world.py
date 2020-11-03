@@ -430,6 +430,8 @@ class CraftWorldEnv(gym.Env):
         delta_workshop_outs = self.workshop_outs - prev_workshop_outs
         for thing, d in enumerate(delta):
             name = self.cookbook.index.get(thing)
+            if isinstance(self.dir, np.ndarray):
+                self.dir = self.dir[0]
             facing_del = self.direction2del[self.dir]
             facing_pos = self.pos[0] + facing_del[0], self.pos[1] + facing_del[1]
 
