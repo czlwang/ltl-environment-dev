@@ -21,7 +21,7 @@ import yaml
 import json
 import pickle
 
-ROOT_PATH = "/storage/czw/ltl-rl/ltl/worlds/" #TODO adjust this
+ROOT_PATH = "/Users/dsleeps/Documents/ltl-environment-dev/ltl/worlds/" #TODO adjust this
 
 def neighbors(pos, width, height, dir=None):
     x, y = pos
@@ -90,6 +90,7 @@ class Cookbook(object):
     def __init__(self, recipes_path):
         with open(recipes_path) as recipes_f:
             recipes = yaml.load(recipes_f, Loader=yaml.FullLoader)
+            # print(recipes)
         #if "fruit" not in recipes_path:
         #    recipes = remap_recipes(recipes)
         self.index = Index()
@@ -119,6 +120,7 @@ class Cookbook(object):
                                   if i+1 not in self.environment]
         self.workshop_indices = [item for item in self.environment if 'recycle' in self.index.get(item)]
         self.out_indices = [item for item in self.environment if 'none' in self.index.get(item)]#outputs of workshop
+        self.switch_indices = [item for item in self.environment if 'switch' in self.index.get(item)]
         self.water_index = self.index["water"]
         self.stone_index = self.index["stone"]
 
@@ -404,6 +406,17 @@ class CraftWorldEnv(gym.Env):
 
     def predicates(self, prev_ds, prev_inv, prev_workshop_outs, prev_approaching):
         pred = []
+        # check to see if the light is on
+        for switch_index in self.cookbook.switch_indices:
+            name = self.cookbook.index.get(switch_index)
+            light_state = np.sum(self.grid[:,:,switch_index]) # Taking advantage of the fact that there's only
+                                                          # one light
+            # A state of 1 is off
+            if (light_state == 1):
+                pred.append(name + '_on')
+            else:
+                pred.append(name + '_off')
+
         # check if the neighbors have env thing
         for nx, ny in nears(self.pos, self._width, self._height):
             here = self.grid[nx, ny, :]
@@ -411,7 +424,9 @@ class CraftWorldEnv(gym.Env):
                 continue
             #print(here)
             #print(here.sum())
-            assert here.sum() == 1
+            # Count the number of nonzero indices
+            # assert here.sum() == 1
+            assert np.count_nonzero(here) == 1
             thing = here.argmax()
             if thing in self.cookbook.environment:
                 if 'recycle' in self.cookbook.index.get(thing):
@@ -493,13 +508,13 @@ class CraftWorldEnv(gym.Env):
                 here = self.grid[nx, ny, :]
                 if not self.grid[nx, ny, :].any():
                     continue
-                #print(here)
-                assert here.sum() == 1
+                assert np.count_nonzero(here) == 1
                 thing = here.argmax()
                 #print("thing", self.cookbook.index.get(thing))
                 #print(self.cookbook.workshop_indices)
                 if not(thing in self.cookbook.grabbable_indices or \
                         thing in self.cookbook.workshop_indices or \
+                        thing in self.cookbook.switch_indices or \
                         thing == self.cookbook.water_index or \
                         thing == self.cookbook.stone_index):
                     continue
@@ -524,6 +539,12 @@ class CraftWorldEnv(gym.Env):
                                 self.inventory[i] += 1
                                 self.workshop_outs[output] -= 1
                         success = True
+                elif thing in self.cookbook.switch_indices:
+                    # Flip the light switch on and off
+                    # 1 is off and 2 is on
+                    # TODO: There are asserts all over the place asserting that things
+                    #       sum to one. Maybe get rid of those?
+                    self.grid[nx, ny, thing] = 2 if self.grid[nx, ny, thing] == 1 else 1
                 elif thing == self.cookbook.water_index:
                     if self.inventory[self.cookbook.index["bridge"]] > 0:
                         self.grid[nx, ny, self.water_index] = 0
@@ -1059,6 +1080,7 @@ def sample_craft_env(args, width=7, height=7, n_steps=1, k_path=5,
                 no_env = True
         count += 1
         if count > n_retries:  # retry too many times
+            print('Tried')
             break
     if no_env:
         env.should_skip = True
@@ -1083,20 +1105,24 @@ def one_hot(grid, n_features):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Craft world')
     args = parser.parse_args()
-    args.recipe_path = ROOT_PATH + 'craft_recipes_basic.yaml'
+    # args.recipe_path = ROOT_PATH + 'craft_recipes_basic.yaml'
+    args.recipe_path = ROOT_PATH + 'craft_recipes_basic_switch.yaml'
     args.num_steps = 20
     args.target_fps = 60
-    args.use_gui = True
-    args.is_headless = False
-    args.formula = "( G ( tree ) )"#NOTE dummy formula
+    args.use_gui = False
+    args.is_headless = True
+    # args.formula = "( G ( tree ) )"#NOTE dummy formula
+    args.formula = "( F ( tree ) )"
     args.prefix_reward_decay = 0.8
     args.update_failed_trans_only = False
     args.return_screen = False
-    env, actions = sample_craft_env(args, n_steps=3)
+    env, actions = sample_craft_env(args, n_steps=3, n_retries=5, train=True)
     if env is None: exit()
     env.ba.draw('tmp_images/ba.svg', show=False)
+    '''
     while True:
         env.gui.draw(move_first=True)
         feature = env.feature()
         img = Image.fromarray(feature[0])
         img.save('tmp_images/feature.png')
+    '''
