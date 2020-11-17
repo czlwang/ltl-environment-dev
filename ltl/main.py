@@ -186,6 +186,7 @@ def get_num_files(args):
 def train(args, formulas):
     device = torch.device(utils.choose_gpu() if args.cuda else "cpu")
     args.device = device
+    print(device)
     # init formula
     for formula, _, _ in formulas:
         if 'grass' in formula or 'toolshed' in formula:
@@ -407,6 +408,7 @@ def train_formula(args, agent, envs, n_epoch=0, n_formula=0):
 
 
 def sample_formulas_train(args):
+    print(args.env_name)
     if args.env_name == 'CharStream':
         args.alphabets = ['a', 'b', 'c', 'd', 'e']
     elif args.env_name == 'Craft':
@@ -435,6 +437,7 @@ def sample_formulas_train(args):
                                paired_gen=False,
                                add_basics=False,
                                n_steps=args.num_steps)
+        print('afsgfdhgsfadsg')
     # filter formulas
     if args.env_name == 'Craft':
         formulas = [(f, ba, paired_f) for f, ba, paired_f in formulas \

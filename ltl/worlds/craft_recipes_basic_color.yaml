@@ -1,0 +1,32 @@
+environment:
+  - tree
+  - workbench
+  - factory
+  - recycle_iron
+  - recycle_gold
+  - recycle_gem
+  - recycle_copper
+  - color_swap_blue
+
+primitives:
+  - iron
+  - gold
+  - gem
+  - copper
+
+recipes:
+  none0:
+    iron: 1
+    _at: recycle_iron
+
+  none2:
+    gold: 1
+    _at: recycle_gold
+
+  none3:
+    gem: 1
+    _at: recycle_gem
+
+  none4:
+    copper: 1
+    _at: recycle_copper

@@ -6,9 +6,10 @@ environment:
   - recycle_iron
   - recycle_gold
   - recycle_gem
+  - recycle_copper
 
 primitives:
   - iron
   - gold
   - gem
-
+  - copper

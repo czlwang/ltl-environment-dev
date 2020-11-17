@@ -120,7 +120,7 @@ def check_should_add(ltl, ba, include_templates, skip_templates, env_name=''):
                     'prefix_reward_decay': 0.8,
                     'num_steps': 15,
                     'target_fps': None,
-                    'use_gui': True,
+                    'use_gui': False,
                     'is_headless': True,
                     'update_failed_trans_only': False
                 })

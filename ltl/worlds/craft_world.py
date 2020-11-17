@@ -21,7 +21,8 @@ import yaml
 import json
 import pickle
 
-ROOT_PATH = "/Users/dsleeps/Documents/ltl-environment-dev/ltl/worlds/" #TODO adjust this
+# ROOT_PATH = "/Users/dsleeps/Documents/ltl-environment-dev/ltl/worlds/" #TODO adjust this
+ROOT_PATH = "/storage/dsleeper/RL_Parser/ltl/ltl/worlds/"
 
 def neighbors(pos, width, height, dir=None):
     x, y = pos
@@ -121,6 +122,8 @@ class Cookbook(object):
         self.workshop_indices = [item for item in self.environment if 'recycle' in self.index.get(item)]
         self.out_indices = [item for item in self.environment if 'none' in self.index.get(item)]#outputs of workshop
         self.switch_indices = [item for item in self.environment if 'switch' in self.index.get(item)]
+        self.color_indices = [item for item in self.environment if 'color_swap' in self.index.get(item)]
+
         self.water_index = self.index["water"]
         self.stone_index = self.index["stone"]
 
@@ -406,6 +409,14 @@ class CraftWorldEnv(gym.Env):
 
     def predicates(self, prev_ds, prev_inv, prev_workshop_outs, prev_approaching):
         pred = []
+        # check to see the current colors of the scene
+        for color_index in self.cookbook.color_indices:
+            name = self.cookbook.index.get(color_index)
+            if (np.sum(self.grid[:,:,color_index]) != 0):
+                pred.append(name + '_on')
+            else:
+                pred.append(name + '_off')
+        
         # check to see if the light is on
         for switch_index in self.cookbook.switch_indices:
             name = self.cookbook.index.get(switch_index)
@@ -447,6 +458,8 @@ class CraftWorldEnv(gym.Env):
             name = self.cookbook.index.get(thing)
             if isinstance(self.dir, np.ndarray):
                 self.dir = self.dir[0]
+            if isinstance(self.dir, torch.Tensor):
+                self.dir = self.dir[0].item()
             facing_del = self.direction2del[self.dir]
             facing_pos = self.pos[0] + facing_del[0], self.pos[1] + facing_del[1]
 
@@ -495,6 +508,17 @@ class CraftWorldEnv(gym.Env):
             n_dir = self.dir
         else:  # not supported move
             raise ValueError('Not supported action')
+
+        # Randomly change the colors if any of them exist
+        for color_index in self.cookbook.color_indices:
+            # TODO Define this somewhere else
+            change_prob = 0.25
+            if (np.random.rand() < change_prob):
+                if (np.sum(self.grid[:,:,color_index]) != 0):
+                    self.grid[0,0,color_index] = 0
+                else:
+                    self.grid[0,0,color_index] = 1
+
         # move
         self.dir = n_dir
         x = self.pos[0] + dx
@@ -1080,7 +1104,6 @@ def sample_craft_env(args, width=7, height=7, n_steps=1, k_path=5,
                 no_env = True
         count += 1
         if count > n_retries:  # retry too many times
-            print('Tried')
             break
     if no_env:
         env.should_skip = True
@@ -1106,7 +1129,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Craft world')
     args = parser.parse_args()
     # args.recipe_path = ROOT_PATH + 'craft_recipes_basic.yaml'
-    args.recipe_path = ROOT_PATH + 'craft_recipes_basic_switch.yaml'
+    args.recipe_path = ROOT_PATH + 'craft_recipes_basic_color.yaml'
     args.num_steps = 20
     args.target_fps = 60
     args.use_gui = False

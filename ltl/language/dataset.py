@@ -134,7 +134,7 @@ if __name__ == '__main__':
                         help='number of steps to take in the environment (default: 15)')
     args = parser.parse_args()
     # other predefined params
-    args.recipe_path = 'worlds/craft_recipes_fruit_basic.yaml'
+    args.recipe_path = 'worlds/craft_recipes_basic.yaml'
     args.prefix_reward_decay = 0.8
     args.target_fps = 60
     args.use_gui = False

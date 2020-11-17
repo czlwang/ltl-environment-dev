@@ -5,11 +5,13 @@ environment:
   - recycle_iron
   - recycle_gold
   - recycle_gem
+  - recycle_copper
 
 primitives:
   - iron
   - gold
   - gem
+  - copper
 
 recipes:
   none0:
@@ -23,3 +25,7 @@ recipes:
   none3:
     gem: 1
     _at: recycle_gem
+
+  none4:
+    copper: 1
+    _at: recycle_copper

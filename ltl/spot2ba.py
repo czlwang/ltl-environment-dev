@@ -253,7 +253,7 @@ class Automaton(object):
 
     @property
     def n_states(self):
-        nodes = [node for node in self._graph.nodes if 'e_' not in node]
+        nodes = [node for node in self._graph.nodes() if 'e_' not in node]
         return len(nodes)
 
     @property
@@ -317,7 +317,7 @@ class Automaton(object):
         acc_states = [int(s) for s in self.get_accept_states()]
         trans_matrix[acc_states, self.n_states] = 1
         # initialize the weight of transition matrix
-        edges = self._graph.edges.data()
+        edges = self._graph.edges(data=True)
         for src, dst, info in edges:
             src = int(src)
             dst = int(dst)
