@@ -17,7 +17,7 @@ def gen_env(args, formula, n_trials=3):
     trial = 0
     envs, action_list = [], []
     while trial < n_trials:
-        env, actions = sample_craft_env(args, max_n_seq=100, goal_only=True, k_path=5, height=7, width=7, n_tracks=1)
+        env, actions = sample_craft_env(args, max_n_seq=100, goal_only=True, k_path=5, height=7, width=7, n_tracks=1, for_dataset=True)
         if env is None:
             trial += 1
             success = False; actions = []
@@ -54,7 +54,7 @@ def filter_formula_by_binding(formula):
 
 
 def gen_dataset(args, n, max_length=15, count_per_sent=1):
-    grammar = SentenceGrammar()
+    grammar = SentenceGrammar(args.recipe_path)
     dataset = []; sent_count = defaultdict(int)
     while len(dataset) < n:
         sentence, formula = grammar.gen_sentence(n=1)[0]
@@ -103,7 +103,10 @@ def save_dataset_json(dataset, args):
 
         for i in range(len(envs)):
             actions_i = actions[i]
-            actions_i, first_accepts = map(list, zip(*actions_i))
+            #actions_i, first_accepts = map(list, zip(*actions_i))
+            #first_accepts = list(first_accepts)
+            
+            actions_i, first_accepts = list(map(list, zip(actions_i)))
             first_accepts = list(first_accepts)
 
             env = envs[i]
@@ -143,6 +146,8 @@ if __name__ == '__main__':
     args.n_trials = 20
     args.n_envs = 10
     args.num_steps = 20
+
+    print(args)
     # generate dataset
     dataset = gen_dataset(args, n=args.n_sentence)
     save_dataset_json(dataset, args)

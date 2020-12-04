@@ -98,6 +98,7 @@ class Cookbook(object):
         self.environment = set(self.get_index(e) for e in recipes["environment"])
         self.primitives = set(self.get_index(p) for p in recipes["primitives"])
         self.recipes = {}
+        self.original_recipes = recipes
         self.output2input = {} #maps none0, none2, none3 to input items
         # set up recipes from yaml file
         if 'recipes' in recipes.keys():
@@ -981,7 +982,7 @@ def get_items(env):
                 things.append(thing)
     return things
 
-def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1):
+def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1, for_dataset=False):
     '''
         If there are at least n_tracks successful tracks return:
             True, [(actions_1, first_accept_1), (actions_2, first_accept_2), ...]
@@ -1051,7 +1052,10 @@ def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1):
                 if done:
                     if (goal_only and reward > 0.9) or (not goal_only and reward > 0):
                         assert reward > 0.9
-                        return True, actions
+                        if (for_dataset):
+                            return True, (actions, found_len,)
+                        else:
+                            return True, actions
                         #seqs.append((actions, found_len))#TODO change back
                 step_j += 1
                 #print(env._formula)
@@ -1069,7 +1073,7 @@ def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1):
 
 def sample_craft_env(args, width=7, height=7, n_steps=1, k_path=5,
                      n_retries=5, env_data=None, train=False, check_action=True,
-                     max_n_seq=50, goal_only=True, n_tracks=1):
+                     max_n_seq=50, goal_only=True, n_tracks=1, for_dataset=False):
     no_env = True; env = None; count = 0; actions = None
     # exclude the env that is true at beginning
     while no_env:
@@ -1099,7 +1103,7 @@ def sample_craft_env(args, width=7, height=7, n_steps=1, k_path=5,
                 break
         if not no_env and check_action:  # filter out the env that doesn't have a solution
             env.reset()
-            success, actions = gen_actions(env, max_n_seq=max_n_seq, goal_only=goal_only, n_tracks=1)
+            success, actions = gen_actions(env, max_n_seq=max_n_seq, goal_only=goal_only, n_tracks=1, for_dataset=for_dataset)
             if not success:
                 no_env = True
         count += 1

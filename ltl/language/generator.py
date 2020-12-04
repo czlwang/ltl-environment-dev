@@ -1,5 +1,6 @@
 import random
 from ltl.spot2ba import Automaton
+import ltl.worlds.craft_world as craft
 
 from collections import defaultdict
 
@@ -57,12 +58,36 @@ CLASS_LTL_PREFIX = {
 
 
 class SentenceGrammar(object):
-    def __init__(self):
+    def __init__(self, recipe_path):
         self._prod = defaultdict(list)
+        self.grammar = ''
+        self.create_grammar(recipe_path)
         self.parse_grammar()
 
-    def parse_grammar(self):
+    def create_grammar(self, recipe_path):
         rules = filter(lambda x: x != '', GRAMMAR.split('\n'))
+        cookbook = craft.Cookbook(recipe_path)
+        for rule in rules:
+            line = ''
+            if (rule.split()[0] == 'Item'):
+                line = '    Item -> '
+                for primitive in cookbook.original_recipes['primitives']:
+                    line += primitive + ' | '
+                line = line[:-3]
+            elif (rule.split()[0] == 'Landmark'):
+                line = '    Landmark -> '
+                for landmark in cookbook.original_recipes['environment']:
+                    # TODO: This is a very hacky way to get the landmarks
+                    if (not '_' in landmark):
+                        line += landmark + ' | '
+                line = line[:-3]
+            else:
+                line = rule
+            self.grammar += line + '\n'
+        self.grammar = self.grammar[:-1]
+
+    def parse_grammar(self):
+        rules = filter(lambda x: x != '', self.grammar.split('\n'))
         for rule in rules:
             rule = rule.strip().split(' -> ')
             lhs = rule[0]; rhs = rule[1]
