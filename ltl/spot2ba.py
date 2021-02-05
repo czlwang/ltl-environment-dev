@@ -179,7 +179,7 @@ class Automaton(object):
     def __init__(self, formula, alphabets=None, add_flexible_state=False, data=None):
         self._graph = nx.DiGraph()
         self._formula = formula
-        #print(self._formula)
+        # print(self._formula)
         #exit()
         self._spot_formula = None
         self._spot_automaton = None

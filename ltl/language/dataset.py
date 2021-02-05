@@ -4,7 +4,8 @@ import numpy as np
 import random
 
 from collections import defaultdict
-from ltl.language.generator import SentenceGrammar
+# TODO change this back to generator
+from ltl.language.generator_refactored import SentenceGrammar
 from ltl.ltl2tree import replace_symbols
 from ltl.worlds.craft_world import sample_craft_env
 
@@ -137,7 +138,7 @@ if __name__ == '__main__':
                         help='number of steps to take in the environment (default: 15)')
     args = parser.parse_args()
     # other predefined params
-    args.recipe_path = 'worlds/craft_recipes_basic.yaml'
+    args.recipe_path = 'worlds/craft_recipes_basic_color.yaml'
     args.prefix_reward_decay = 0.8
     args.target_fps = 60
     args.use_gui = False

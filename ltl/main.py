@@ -32,6 +32,10 @@ def get_args():
                         help='random seed (default: 1)')
     parser.add_argument('--env_name', default='CharStream',
                         help='environment to train on: CharStream | Craft')
+    parser.add_argument('--det_agent_num', default=0,
+                        help='number of deterministic agents in the evironment')
+    parser.add_argument('--neural_agent_num', default=1,
+                        help='number of neural agents in the evironment')
     parser.add_argument('--num_train_ltls', type=int, default=50,
                         help='number of sampled ltl formula for training (default: 50)')
     parser.add_argument('--cuda_deterministic', action='store_true', default=False,
@@ -413,6 +417,7 @@ def sample_formulas_train(args):
         args.alphabets = ['a', 'b', 'c', 'd', 'e']
     elif args.env_name == 'Craft':
         args.recipe_path = 'worlds/craft_recipes_basic.yaml'
+        # args.recipe_path = 'worlds/craft_recipes_basic_color.yaml'
         args.alphabets = craft.get_alphabets(args.recipe_path)
         args.use_gui = False
         args.is_headless = True
@@ -437,7 +442,6 @@ def sample_formulas_train(args):
                                paired_gen=False,
                                add_basics=False,
                                n_steps=args.num_steps)
-        print('afsgfdhgsfadsg')
     # filter formulas
     if args.env_name == 'Craft':
         formulas = [(f, ba, paired_f) for f, ba, paired_f in formulas \
@@ -457,6 +461,7 @@ def sample_formulas_test(args):
         args.alphabets = ['a', 'b', 'c', 'd', 'e']
     elif args.env_name == 'Craft':
         args.recipe_path = 'worlds/craft_recipes_basic.yaml'
+        # args.recipe_path = 'worlds/craft_recipes_basic_color.yaml'
         args.alphabets = craft.get_alphabets(args.recipe_path)
         args.is_headless = True
         args.use_gui = False
@@ -544,7 +549,7 @@ def test(args, formulas, model_name):
         if args.save_env_data:
             data.append(env.get_data())
         ltl_tree = ltl2tree(args.formula, args.alphabets, args.baseline)
-        print("Test formula {}, {}".format(args.formula, env._formula))
+        print("Test formula {}, {}".format(args.formula, env.all_agents[0].formula))
         if args.lang_emb:
             agent.update_formula(ltl_tree, ltl2onehot(args.formula, args.alphabets))
         else:
@@ -593,7 +598,7 @@ def test(args, formulas, model_name):
 
 def main():
     args = get_args()
-
+    print(args.neural_agent_num)
     #torch.manual_seed(args.seed)
     #torch.cuda.manual_seed_all(args.seed)
 

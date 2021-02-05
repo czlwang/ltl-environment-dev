@@ -12,9 +12,11 @@ GRAMMAR = """
     Not -> 'not'
     Item -> 'apple' | 'orange' | 'pear'
     Landmark -> 'flag' | 'house' | 'tree'
+    Color -> 'blue'
+    Condition -> Color
     Predicate -> 'be around the' Landmark | 'be near the' Landmark | 'go to the' Landmark | 'hold the' Item | 'take the' Item | 'possess the' Item
     p -> Predicate | UOp Predicate | Predicate BinOp Predicate | UOp p
-    S -> Safety | Guarantee | Obligation | Recurrence | Persistence | Reactivity
+    S -> Safety | Guarantee | Obligation | Recurrence | Persistence | Reactivity | Conditional
     SPrefix -> 'always' | 'at all times,'
     SSuffix -> 'forever' | 'at all times' | 'all the time'
     Safety -> SPrefix p | p SSuffix | Safety BinOp Safety
@@ -25,8 +27,9 @@ GRAMMAR = """
     Recurrence -> 'eventually,' p 'and do this repeatedly' | Recurrence BinOp Recurrence
     Persistence -> 'at some point, start to' p 'and keep doing it' | Persistence BinOp Persistence
     Reactivity -> Recurrence BinOp Persistence | Reactivity BinOp Recurrence | Reactivity BinOp Persistence
+    Conditional -> 'while' Condition '' Predicate | Predicate 'until' Condition
 """
-
+# S -> Safety | Guarantee | Obligation | Recurrence | Persistence | Reactivity | Conditional
 
 #GRAMMAR = """
 #    BinOp -> 'and' | 'or'
@@ -53,7 +56,7 @@ CLASS_LTL_PREFIX = {
         'Safety': 'G ',
         'Guarantee': 'F ',
         'Recurrence': 'G F ',
-        'Persistence': 'F G '
+        'Persistence': 'F G ',
         }
 
 
@@ -72,14 +75,14 @@ class SentenceGrammar(object):
             if (rule.split()[0] == 'Item'):
                 line = '    Item -> '
                 for primitive in cookbook.original_recipes['primitives']:
-                    line += primitive + ' | '
+                    line += '\'' + primitive + '\' | '
                 line = line[:-3]
             elif (rule.split()[0] == 'Landmark'):
                 line = '    Landmark -> '
                 for landmark in cookbook.original_recipes['environment']:
                     # TODO: This is a very hacky way to get the landmarks
                     if (not '_' in landmark):
-                        line += landmark + ' | '
+                        line += '\'' + landmark + '\' | '
                 line = line[:-3]
             else:
                 line = rule
@@ -174,6 +177,7 @@ class SentenceGrammar(object):
         # sample for a production
         rand_prod = self._prod[symbol][self._weighted_choice(weights)]
         pcount[rand_prod] += 1
+        print(rand_prod)
         if rand_prod in self._prod.keys():
             sentence, formula = self.gen_random(rand_prod, cfactor=cfactor, pcount=pcount, excludes=excludes, negate=negate)
         else:
@@ -195,10 +199,12 @@ class SentenceGrammar(object):
 
 
 if __name__ == '__main__':
-    grammar = SentenceGrammar()
+    grammar = SentenceGrammar('/storage/dsleeper/RL_Parser/ltl/ltl/worlds/craft_recipes_basic_color.yaml')
     for sentence, formula in grammar.gen_sentence(n=10):
         print('Sentence:', sentence)
         print('  LTL:', formula)
-        alphabets = ['boundary', 'C_boundary', 'tree', 'C_tree', 'house', 'C_house', 'flag', 'C_flag', 'orange', 'C_orange','apple', 'C_apple', 'pear', 'C_pear']
+        # alphabets = ['boundary', 'C_boundary', 'tree', 'C_tree', 'house', 'C_house', 'flag', 'C_flag', 'orange', 'C_orange','apple', 'C_apple', 'pear', 'C_pear']
+        # alphabets = ['boundary', 'C_boundary', 'tree', 'C_tree', 'workbench', 'C_workbench', 'factory', 'C_factory', 'iron', 'C_iron', 'gold', 'C_gold', 'gem', 'C_gem', 'copper', 'C_copper']
+        alphabets = ['boundary', 'C_boundary', 'tree', 'C_tree', 'workbench', 'C_workbench', 'factory', 'C_factory', 'iron', 'C_iron', 'gold', 'C_gold', 'gem', 'C_gem', 'blue_on', 'blue_off']
         Automaton(formula, alphabets, add_flexible_state=False) 
 

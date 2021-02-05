@@ -9,6 +9,7 @@ from ltl.spot2ba import Automaton
 from ltl.utils import Index, pad_slice
 from pathlib import Path
 
+import ltl.agent as Agent
 import itertools
 import argparse
 import copy
@@ -124,7 +125,6 @@ class Cookbook(object):
         self.out_indices = [item for item in self.environment if 'none' in self.index.get(item)]#outputs of workshop
         self.switch_indices = [item for item in self.environment if 'switch' in self.index.get(item)]
         self.color_indices = [item for item in self.environment if 'color_swap' in self.index.get(item)]
-
         self.water_index = self.index["water"]
         self.stone_index = self.index["stone"]
 
@@ -248,8 +248,8 @@ class CraftGui(object):
                 px_y = row*self._cell_height
                 rect = pygame.Rect(px_x, px_y, self._cell_width, self._cell_height)
                 pygame.draw.rect(self._screen, (00,00,00), rect, 2)
-                if self._env.grid[x, y, :].any() or (x, y) == self._env.pos:
-                    thing = self._env.grid[x, y, :].argmax()
+                if self._env.get_item(x, y) or (x, y) == self._env.pos:
+                    thing = self._env.get_item(x, y)
                     if (x, y) == self._env.pos:
                         #objs = self.
                         obj_str = ''
@@ -311,10 +311,11 @@ class CraftWorldEnv(gym.Env):
         up    = 1 # move up
         left  = 2 # move left
         right = 3 # move right
-        use   = 4 # use
+        nothing=4 # do nothing
+        use   = 5 # use
 
-    def __init__(self, formula, recipe_path,
-                 init_pos, init_dir, grid,
+    def __init__(self, formulas, recipe_path,
+                 init_pos, init_dir, grid, neural_agent_num=1, det_agent_num=1,
                  width=7, height=7, window_width=5, window_height=5,
                  prefix_reward_decay=1., time_limit=10,
                  use_gui=True, target_fps=None, is_headless=False,
@@ -323,19 +324,21 @@ class CraftWorldEnv(gym.Env):
         self.cookbook = Cookbook(recipe_path)
         # environment rl parameter
         self.actions = CraftWorldEnv.Actions
-        self.action_space = spaces.Discrete(len(self.actions))
+        self.action_space = spaces.Discrete(len(self.actions) * neural_agent_num)
         self.del2direction = {(-1,0): int(CraftWorldEnv.Actions.left),
                           (1,0): int(CraftWorldEnv.Actions.right),
                           (0,-1): int(CraftWorldEnv.Actions.down),
-                          (0,1): int(CraftWorldEnv.Actions.up)}
+                          (0,1): int(CraftWorldEnv.Actions.up),
+                          (0,0): int(CraftWorldEnv.Actions.nothing)}
         self.direction2del = {x:y for y,x in self.del2direction.items()}
-
+        
         # set up gui
         self._use_gui = use_gui
         if use_gui:
             self.gui = CraftGui(self, width, height,
                                 is_headless=is_headless,
                                 target_fps=target_fps)
+        # TODO dsleeps: Fix the gui observation space
         if use_gui:
             self.observation_space = spaces.Tuple((
                 spaces.Box(low=0, high=255,
@@ -350,8 +353,9 @@ class CraftWorldEnv(gym.Env):
             )
         else:
             self.n_features = \
-                window_width * window_height * (self.cookbook.n_kinds+1) + \
-                self.cookbook.n_kinds + 4
+                window_width * window_height * \
+                (self.cookbook.n_kinds+1 + int(neural_agent_num) + int(det_agent_num) - 1) + \
+                self.cookbook.n_kinds + 4 + 1 # TODO dsleeps: For some reason this is off by 1
             self.observation_space = self.observation_space = spaces.Tuple((
                 spaces.Box(low=0, high=time_limit,
                            shape=(self.n_features, ),
@@ -364,49 +368,90 @@ class CraftWorldEnv(gym.Env):
         self.time_limit = time_limit
         self.update_failed_trans_only = update_failed_trans_only
         # convert the ltl formula to a Buchi automaton
-        self._formula = formula
+        self._formulas = formulas
         self._alphabets = get_alphabets(recipe_path)
         #print(self.update_failed_trans_only)
         #exit()
+        # TODO dsleeps: Implement this for multi-agent
         if self.update_failed_trans_only:
             ltl_tree = ltl2tree(self._formula, self._alphabets)
             self._anno_formula, _, self._anno_maps = ltl_tree_with_annotation_str(ltl_tree, idx=0)
             self.ba = Automaton(self._anno_formula, self._alphabets, add_flexible_state=False)
         else:
-            self.ba = Automaton(formula, self._alphabets, add_flexible_state=False)
-
+            self.bas = []
+            self._last_states = []
+            for formula in formulas:
+                self.bas.append(Automaton(formula, self._alphabets, add_flexible_state=False))
         #self.ba.draw('tmp_images/ba.svg', show=False)
         #exit()
         self._seq = []
-        self._last_states = set(self.ba.get_initial_state())
-        self._state_visit_count = 0
         # set the environment
         self._width = width
         self._height = height
         self._window_width = window_width
         self._window_height = window_height
-        self._init_pos = init_pos
-        self._init_dir = init_dir
-        self._init_grid = grid
-        self.pos = copy.deepcopy(init_pos)
-        self.dir = copy.deepcopy(init_dir)
         self.grid = copy.deepcopy(grid)
-        self.inventory = np.zeros(self.cookbook.n_kinds)
+        self.neural_agent_num = int(neural_agent_num)
+        self.det_agent_num = int(det_agent_num)
+
+        # The neural agents are first in the indices, then it's by the order of the list
+        # The inventory object is shared across all agents, and each one knows its index
+        self.inventories = np.zeros((int(neural_agent_num) + int(det_agent_num), self.cookbook.n_kinds))
+
         self.workshop_outs = np.zeros(self.cookbook.n_kinds)#NOTE czw check
-        self.approaching = []#NOTE czw check
+        self.approaching = [[]] * (int(neural_agent_num) + int(det_agent_num)) #NOTE czw check 
+        
+        # Create the agents
+        self.load((grid, init_pos, init_dir), False)
+
         # start the first game
         self.reset()
         self.should_skip = False
         #print("init_done")
 
-    def load(self, data):
+    def load(self, data, do_reset=True):
         self._init_grid = data[0]
-        self._init_pos = data[1]
-        self._init_dir = data[2]
-        self.reset()
+        init_pos = data[1]
+        init_dir = data[2]
+        
+        if (type(init_pos) != list):
+            init_pos = [init_pos]
+        if (type(init_dir) != list):
+            init_dir = [init_dir]
+
+        self.neural_agents = [Agent.NeuralAgent(init_pos[i], init_dir[i], 
+                                                self.inventories[i], i, 'Agent_' + str(i) + '_',
+                                                self._formulas[i], 
+                                                self.bas[i]) for i in range(self.neural_agent_num)]
+        
+        self.det_agents = []
+        i = len(self.neural_agents)
+        while (len(init_pos) != i):
+            self.det_agents.append(Agent.RandomAgent(init_pos[i], init_dir[i], self.inventories[i], i, 
+                                                    'Agent_' + str(i) + '_', False))
+            i += 1
+        
+        # If positions haven't been specified for all of the non-neural agents
+        # then randomize the remaining ones 
+        while (len(self.det_agents) < self.det_agent_num):
+            r_pos = (np.random.randint(self._width), np.random.randint(self._height))
+            if (self.get_item(r_pos[0], r_pos[1]) == 0):
+                # self.Actions - 1 ensures that I don't accidentally get a use action
+                self.det_agents.append( \
+                     Agent.RandomAgent(r_pos, np.random.randint(len(self.Actions)-1), self.inventories[i], i, 
+                                       'Agent_' + str(i) + '_', False))
+                i += 1
+        
+        # A list combining the two
+        self.all_agents = self.neural_agents + self.det_agents
+        
+        if (do_reset):
+            self.reset()
 
     def get_data(self):
-        return self._init_grid, self._init_pos, self._init_dir
+        init_pos = [agent._init_pos for agent in self.all_agents]
+        init_dir = [agent._init_dir for agent in self.all_agents]
+        return self._init_grid, init_pos, init_dir
 
     def predicates(self, prev_ds, prev_inv, prev_workshop_outs, prev_approaching):
         pred = []
@@ -414,9 +459,10 @@ class CraftWorldEnv(gym.Env):
         for color_index in self.cookbook.color_indices:
             name = self.cookbook.index.get(color_index)
             if (np.sum(self.grid[:,:,color_index]) != 0):
-                pred.append(name + '_on')
+                pred.append(name)
             else:
-                pred.append(name + '_off')
+                pass
+                # pred.append(name + '_off')
         
         # check to see if the light is on
         for switch_index in self.cookbook.switch_indices:
@@ -430,192 +476,216 @@ class CraftWorldEnv(gym.Env):
                 pred.append(name + '_off')
 
         # check if the neighbors have env thing
-        for nx, ny in nears(self.pos, self._width, self._height):
-            here = self.grid[nx, ny, :]
-            if not self.grid[nx, ny, :].any():
-                continue
-            #print(here)
-            #print(here.sum())
-            # Count the number of nonzero indices
-            # assert here.sum() == 1
-            assert np.count_nonzero(here) == 1
-            thing = here.argmax()
-            if thing in self.cookbook.environment:
-                if 'recycle' in self.cookbook.index.get(thing):
-                    continue  # temp for basic
-                if self.cookbook.index.get(thing) not in pred:
-                    pred.append(self.cookbook.index.get(thing))
-        # check if any item in the inventory
-        for thing, count in enumerate(self.inventory):
-            name = self.cookbook.index.get(thing)
-            if count > 0 and 'none' not in name:
-                pred.append(name)
-        # check if getting closer to an item
-        ds = self.dist2items()
-        delta = ds - prev_ds
-        delta_inv = self.inventory - prev_inv
-        delta_workshop_outs = self.workshop_outs - prev_workshop_outs
-        for thing, d in enumerate(delta):
-            name = self.cookbook.index.get(thing)
-            if isinstance(self.dir, np.ndarray):
-                self.dir = self.dir[0]
-            if isinstance(self.dir, torch.Tensor):
-                self.dir = self.dir[0].item()
-            facing_del = self.direction2del[self.dir]
-            facing_pos = self.pos[0] + facing_del[0], self.pos[1] + facing_del[1]
+        for i, agent in enumerate(self.all_agents):
+            agent_str = agent.pred_str
+            for nx, ny in nears(agent.pos, self._width, self._height):
+                here = self.grid[nx, ny, :]
+                if not self.get_item(nx, ny):
+                    continue
+                # TODO: With something like color these asserts no longer make any sense
+                # assert np.count_nonzero(here) == 1
+                # TODO: The argmax call no longer works because two things can be in the same
+                thing = here.argmax()
+                if thing in self.cookbook.environment:
+                    if 'recycle' in self.cookbook.index.get(thing):
+                        continue  # temp for basic
+                    if self.cookbook.index.get(thing) not in pred:
+                        pred.append(agent_str + self.cookbook.index.get(thing))
+            # check if any item in the inventory
+            for thing, count in enumerate(agent.get_items()):
+                name = self.cookbook.index.get(thing)
+                if count > 0 and 'none' not in name:
+                    pred.append(agent_str + name)
+            # check if getting closer to an item
+            ds = self.dist2items(agent)
+            delta = ds - prev_ds
+            delta_inv = agent.get_items() - prev_inv[i]
+            delta_workshop_outs = self.workshop_outs - prev_workshop_outs
+            for thing, d in enumerate(delta):
+                name = self.cookbook.index.get(thing)
+                if isinstance(agent.dir, np.ndarray):
+                    agent.dir = agent.dir[0]
+                if isinstance(agent.dir, torch.Tensor):
+                    agent.dir = agent.dir[0].item()
+                facing_del = self.direction2del[agent.dir]
+                facing_pos = agent.pos[0] + facing_del[0], agent.pos[1] + facing_del[1]
 
-            closer_to_thing = False
-            #print(sum(delta_inv))
-            if d < 0:
-                pred.append('C_' + name)
-                closer_to_thing = True
-            elif -0.1 < d < 0.1 and sum(delta_inv) != 0: #NOTE czw changed from > to !=
-                closer_pred = 'C_' + name
-                if closer_pred in prev_approaching:
-                    pred.append('C_' + name)
+                closer_to_thing = False
+                #print(sum(delta_inv))
+                if d < 0:
+                    pred.append(agent_str + 'C_' + name)
                     closer_to_thing = True
-            elif facing_pos[0] in range(self._width) and facing_pos[1] in range(self._height):
-                facing_item = self.grid[facing_pos[0], facing_pos[1], :]
-                if -0.1 < d < 0.1 and facing_item.any() and facing_item.argmax() == thing:#NOTE czw: if facing the right item
-                    pred.append('C_' + name)
-                    closer_to_thing = True
-            if closer_to_thing:#NOTE:czw if item is in the bin, then we can be moving closer to it
-                if 'recycle' in name:
-                    input_name = name.split('_')[1]
-                    output_name = self.cookbook.input2output[input_name]
-                    output_idx = self.cookbook.get_index(output_name)
-                    if self.workshop_outs[output_idx] > 0:
-                        pred.append('C_' + input_name)
-        self.approaching = list(filter(lambda x: 'C_' in x, pred))
+                elif -0.1 < d < 0.1 and sum(delta_inv) != 0: #NOTE czw changed from > to !=
+                    closer_pred = 'C_' + name
+                    if closer_pred in prev_approaching:
+                        pred.append(agent_str + 'C_' + name)
+                        closer_to_thing = True
+                elif facing_pos[0] in range(self._width) and facing_pos[1] in range(self._height):
+                    facing_item = self.grid[facing_pos[0], facing_pos[1], :]
+                    if -0.1 < d < 0.1 and facing_item.any() and facing_item.argmax() == thing:#NOTE czw: if facing the right item
+                        pred.append(agent_str + 'C_' + name)
+                        closer_to_thing = True
+                if closer_to_thing:#NOTE:czw if item is in the bin, then we can be moving closer to it
+                    if 'recycle' in name:
+                        input_name = name.split('_')[1]
+                        output_name = self.cookbook.input2output[input_name]
+                        output_idx = self.cookbook.get_index(output_name)
+                        if self.workshop_outs[output_idx] > 0:
+                            pred.append(agent_str + 'C_' + input_name)
+            self.approaching[i] = list(filter(lambda x: 'C_' in x, pred))
         return pred
+    
+    def filter_predicates(self, preds, agent):
+        new_preds = []
+        for pred in preds:
+            if (agent.pred_str in pred):
+                new_preds.append(pred[len(agent.pred_str):])
+            else:
+                new_preds.append(pred)
+        return new_preds
 
     def step(self, action, no_eval=False):
-        prev_ds = self.dist2items()
-        prev_inv = copy.deepcopy(self.inventory)
+        if (type(action) != list):
+            action = [action]
+        
+        prev_inv = copy.deepcopy(self.inventories)
         prev_approaching = copy.deepcopy(self.approaching)
         prev_workshop_outs = copy.deepcopy(self.workshop_outs)
-        x, y = self.pos
-        n_dir = action
-        if action == self.actions.left:
-            dx, dy = (-1, 0)
-        elif action == self.actions.right:
-            dx, dy = (1, 0)
-        elif action == self.actions.up:
-            dx, dy = (0, 1)
-        elif action == self.actions.down:
-            dx, dy = (0, -1)
-        elif action == self.actions.use:
-            dx, dy = (0, 0)
-            n_dir = self.dir
-        else:  # not supported move
-            raise ValueError('Not supported action')
+        for i, agent in enumerate(self.all_agents):
+            prev_ds = self.dist2items(agent)
+            x, y = agent.pos
+            if (agent.is_neural):
+                agent_action = action[i]
+            else:
+                agent_action = agent.take_action()
+            n_dir = agent_action
 
+            if agent_action == self.actions.left:
+                dx, dy = (-1, 0)
+            elif agent_action == self.actions.right:
+                dx, dy = (1, 0)
+            elif agent_action == self.actions.up:
+                dx, dy = (0, 1)
+            elif agent_action == self.actions.down:
+                dx, dy = (0, -1)
+            elif agent_action == self.actions.use:
+                dx, dy = (0, 0)
+                n_dir = agent.dir
+            elif agent_action == self.actions.nothing:
+                dx, dy = (0, 0)
+                n_dir = agent.dir
+            else:  # not supported move
+                raise ValueError('Not supported action')
+
+            # move
+            agent.dir = n_dir
+            x = x + dx
+            y = y + dy
+
+            # TODO: Should agents be able to be in the same square?
+            if x in range(0, self._width) and y in range(0, self._height) and \
+               not self.get_item(x, y) and not (x, y) in [a.pos for a in self.all_agents]:
+                agent.pos = (x, y)
+            # take `use` action
+            if agent_action == self.actions.use:
+                success = False
+                for nx, ny in neighbors(agent.pos, self._width, self._height, agent.dir):
+                    if not self.get_item(nx, ny):
+                        continue
+                    thing = self.get_item(nx, ny)
+                    #print("thing", self.cookbook.index.get(thing))
+                    #print(self.cookbook.workshop_indices)
+                    if not(thing in self.cookbook.grabbable_indices or \
+                            thing in self.cookbook.workshop_indices or \
+                            thing in self.cookbook.switch_indices or \
+                            thing == self.cookbook.water_index or \
+                            thing == self.cookbook.stone_index):
+                        continue
+                    if thing in self.cookbook.grabbable_indices:
+                        agent.get_items()[thing] += 1
+                        self.grid[nx, ny, thing] = 0
+                        success = True
+                    elif thing in self.cookbook.workshop_indices:
+                        workshop = self.cookbook.index.get(thing)
+                        for output, inputs in self.cookbook.recipes.items():
+                            if inputs["_at"] != workshop:
+                                continue
+                            for key in inputs.keys():
+                                if key == '_at':
+                                    continue
+                                if agent.get_items()[key] == 0 and self.workshop_outs[output] == 0:
+                                    continue
+                                if agent.get_items()[key] >= inputs[key]:
+                                    agent.get_items()[key] -= inputs[key]
+                                    self.workshop_outs[output] += 1
+                                elif self.workshop_outs[output] > 0:
+                                    agent.get_items()[key] += 1
+                                    self.workshop_outs[output] -= 1
+                            success = True
+                    elif thing in self.cookbook.switch_indices:
+                        # Flip the light switch on and off
+                        # 1 is off and 2 is on
+                        # TODO: There are asserts all over the place asserting that things
+                        #       sum to one. Maybe get rid of those?
+                        self.grid[nx, ny, thing] = 2 if self.grid[nx, ny, thing] == 1 else 1
+                    elif thing == self.cookbook.water_index:
+                        if agent.get_items()[self.cookbook.index["bridge"]] > 0:
+                            self.grid[nx, ny, self.water_index] = 0
+                            agent.get_items()[self.cookbook.index["bridge"]] -= 1
+                    elif thing == self.cookbook.stone_index:
+                        if agent.get_items()[self.cookbook.index["axe"]] > 0:
+                            self.grid[nx, ny, self.stone_index] = 0
+                    break
+        
         # Randomly change the colors if any of them exist
         for color_index in self.cookbook.color_indices:
             # TODO Define this somewhere else
-            change_prob = 0.25
+            change_prob = 0.1
             if (np.random.rand() < change_prob):
                 if (np.sum(self.grid[:,:,color_index]) != 0):
-                    self.grid[0,0,color_index] = 0
+                    self.grid[:,:,color_index] = 0
                 else:
-                    self.grid[0,0,color_index] = 1
+                    self.grid[:,:,color_index] = 1
 
-        # move
-        self.dir = n_dir
-        x = self.pos[0] + dx
-        y = self.pos[1] + dy
-        if x in range(0, self._width) and y in range(0, self._height) and not self.grid[x, y, :].any():
-            self.pos = (x, y)
-        # take `use` action
-        if action == self.actions.use:
-            success = False
-            for nx, ny in neighbors(self.pos, self._width, self._height, self.dir):
-                here = self.grid[nx, ny, :]
-                if not self.grid[nx, ny, :].any():
-                    continue
-                assert np.count_nonzero(here) == 1
-                thing = here.argmax()
-                #print("thing", self.cookbook.index.get(thing))
-                #print(self.cookbook.workshop_indices)
-                if not(thing in self.cookbook.grabbable_indices or \
-                        thing in self.cookbook.workshop_indices or \
-                        thing in self.cookbook.switch_indices or \
-                        thing == self.cookbook.water_index or \
-                        thing == self.cookbook.stone_index):
-                    continue
-                if thing in self.cookbook.grabbable_indices:
-                    self.inventory[thing] += 1
-                    self.grid[nx, ny, thing] = 0
-                    success = True
-                elif thing in self.cookbook.workshop_indices:
-                    workshop = self.cookbook.index.get(thing)
-                    for output, inputs in self.cookbook.recipes.items():
-                        if inputs["_at"] != workshop:
-                            continue
-                        for i in inputs.keys():
-                            if i == '_at':
-                                continue
-                            if self.inventory[i] == 0 and self.workshop_outs[output] == 0:
-                                continue
-                            if self.inventory[i] >= inputs[i]:
-                                self.inventory[i] -= inputs[i]
-                                self.workshop_outs[output] += 1
-                            elif self.workshop_outs[output] > 0:
-                                self.inventory[i] += 1
-                                self.workshop_outs[output] -= 1
-                        success = True
-                elif thing in self.cookbook.switch_indices:
-                    # Flip the light switch on and off
-                    # 1 is off and 2 is on
-                    # TODO: There are asserts all over the place asserting that things
-                    #       sum to one. Maybe get rid of those?
-                    self.grid[nx, ny, thing] = 2 if self.grid[nx, ny, thing] == 1 else 1
-                elif thing == self.cookbook.water_index:
-                    if self.inventory[self.cookbook.index["bridge"]] > 0:
-                        self.grid[nx, ny, self.water_index] = 0
-                        self.inventory[self.cookbook.index["bridge"]] -= 1
-                elif thing == self.cookbook.stone_index:
-                    if self.inventory[self.cookbook.index["axe"]] > 0:
-                        self.grid[nx, ny, self.stone_index] = 0
-                break
         if no_eval:
             return
 
         # get predicates
         trans = self.predicates(prev_ds, prev_inv, prev_workshop_outs, prev_approaching)
-        self._seq.append(trans)
-        done = len(self._seq) >= self.time_limit
-        #print(len(self._seq), self.time_limit)
+        for agent in self.neural_agents:
+            # Filter out the preds with agent_str in front for the autonoma
+            agent.seq.append(self.filter_predicates(trans, agent))
+        
+        # They should all be the same length so we can just check the first
+        done = len(self.neural_agents[0].seq) >= self.time_limit
+        
         # check if it is prefix or accepting state
-        #print("trans")
-        #print(trans)
-        #exit()
-        is_prefix, dist_to_accept, last_states, failed_trans = \
-                self.ba.is_prefix([self._seq[-1]], self._last_states)
-        #print("last states", self._last_states)
-        #print("is_prefix", is_prefix)
-        is_accept = is_prefix and dist_to_accept < 0.1
-        if is_accept:  # not done even if it is in accept state
-            reward = 1
-            self._last_states = set([s for s in last_states if self.ba.is_accept(s)])
-        elif is_prefix:
-            if len(last_states.intersection(self._last_states)) > 0:
-                self._state_visit_count += 1
+        rewards = []
+        for agent in self.neural_agents:
+            reward = 0
+            is_prefix, dist_to_accept, last_states, failed_trans = \
+                    agent.ba.is_prefix([agent.seq[-1]], agent.last_states)
+            is_accept = is_prefix and dist_to_accept < 0.1
+            if is_accept:  # not done even if it is in accept state
+                reward = 1
+                agent.last_states = set([s for s in last_states if agent.ba.is_accept(s)])
+            elif is_prefix:
+                if len(last_states.intersection(agent.last_states)) > 0:
+                    agent.state_visit_count += 1
+                else:
+                    agent.state_visit_count = 1
+                agent.last_states = last_states
+                if agent.state_visit_count == 1:
+                    reward = 0.1
+                else:
+                    reward = 0.1 * (self.prefix_reward_decay ** (agent.state_visit_count - 1))
             else:
-                self._state_visit_count = 1
-            self._last_states = last_states
-            if self._state_visit_count == 1:
-                reward = 0.1
-            else:
-                reward = 0.1 * (self.prefix_reward_decay ** (self._state_visit_count - 1))
-        else:
-            reward = -1
-            done = True
-        if done and reward < 0.2:  # penalize if reaching time limit but not accept
-            reward = -1
-        #print(self._seq, reward)
-        #print(reward)
-        #self.visualize()
+                reward = -1
+                done = True
+            if done and reward < 0.2:  # penalize if reaching time limit but not accept
+                reward = -1
+            rewards.append(reward)
+        
         if self._use_gui:
             self.gui.draw()
         info = {}
@@ -628,66 +698,79 @@ class CraftWorldEnv(gym.Env):
                     if 'a_' in symbol:
                         components = components.union(self._anno_maps[symbol])
             info = {'failed_components': components}
-        #print("reward", reward)
-        #print("done", done)
-        return self.feature(), reward, done, info
+        
+        # TODO dsleeps: For now just return one of the rewards  
+        return self.feature(), rewards[0], done, info
+    
+    # Have to update this function for every element that isn't an "item"
+    def get_item(self, x, y):
+        item_indices = np.where(self.grid[x, y, :] == 1)
+        for i in item_indices[0]:
+            if not i in self.cookbook.color_indices:
+                return i
+        return 0
 
-    def dist2items(self):
+    def dist2items(self, agent):
         # no need to -2 if no boundary
         total_ds = float(self._width + self._height)
         min_ds = np.ones(self.cookbook.n_kinds) * total_ds
         for y in reversed(range(self._height)):
             for x in range(self._width):
-                if not (self.grid[x, y, :].any() or (x, y) == self.pos):
+                if not (self.get_item(x, y) or (x, y) == agent.pos):
                     continue
                 else:
-                    thing = self.grid[x, y, :].argmax()
-                    d = abs(x - self.pos[0]) + abs(y - self.pos[1])
+                    thing = self.get_item(x, y)
+                    d = abs(x - agent.pos[0]) + abs(y - agent.pos[1])
                     #print(thing)
                     #print(self.cookbook.index.get(thing))
                     if min_ds[thing] > d:
                         min_ds[thing] = d
         # distance is zero if own the item
-        for i, count in enumerate(self.inventory):
+        for i, count in enumerate(agent.get_items()):
             if count > 0:
                 min_ds[i] = 0
         return min_ds
 
-    def closer_feature(self):
+    def closer_feature(self, agent):
         ds = []
         # remember the current config
-        current_ds = self.dist2items()
+        current_ds = self.dist2items(agent)
         current_grid = copy.deepcopy(self.grid)
-        current_inventory = copy.deepcopy(self.inventory)
+        current_inventory = copy.deepcopy(agent.get_items())
         current_workshop_outs = copy.deepcopy(self.workshop_outs)
-        current_approaching = copy.deepcopy(self.approaching)
+        current_approaching = copy.deepcopy(self.approaching[agent.inv_index])
         #print("current_aproaching", list(current_approaching))
-        current_pos = copy.deepcopy(self.pos)
-        current_dir = copy.deepcopy(self.dir)
+        current_pos = copy.deepcopy(agent.pos)
+        current_dir = copy.deepcopy(agent.dir)
         for action in range(5):
             # take step
-            self.step(action, no_eval=True)
-            ds.append(current_ds-self.dist2items())
+            actions = [5] * self.neural_agent_num
+            if (agent.is_neural):
+                actions[agent.inv_index] = action
+            self.step(actions, no_eval=True)
+            ds.append(current_ds-self.dist2items(agent))
+
             # restore the current grid
             self.grid = copy.deepcopy(current_grid)
-            self.inventory = copy.deepcopy(current_inventory)
+            self.inventories[agent.inv_index] = copy.deepcopy(current_inventory)
             self.workshop_outs = copy.deepcopy(current_workshop_outs)
-            self.approaching = copy.deepcopy(current_approaching)
-            self.pos = copy.deepcopy(current_pos)
-            self.dir = copy.deepcopy(current_dir)
+            self.approaching[agent.inv_index] = copy.deepcopy(current_approaching)
+            agent.pos = copy.deepcopy(current_pos)
+            agent.dir = copy.deepcopy(current_dir)
         ds = np.asarray(ds)
         return np.transpose(ds, (1, 0))
 
     def feature(self):
-        x, y = self.pos
-        # position features
-        pos_feats = np.asarray(self.pos).astype(np.float32)
-        pos_feats[0] /= self._width
-        pos_feats[1] /= self._height
-        # direction features
-        dir_features = np.zeros(4)
-        dir_features[self.dir] = 1
+        # TODO dsleeps: Fix the gui code in the feature function
         if self._use_gui:
+            # position features
+            pos_feats = np.asarray(agent.pos).astype(np.float32)
+            pos_feats[0] /= self._width
+            pos_feats[1] /= self._height
+            # direction features
+            dir_features = np.zeros(5)
+            dir_features[agent.dir] = 1
+            
             hw = int(self._window_width / 2)
             hh = int(self._window_height / 2)
             img_str = pygame.image.tostring(self.gui._screen, 'RGB')
@@ -705,44 +788,65 @@ class CraftWorldEnv(gym.Env):
             out_img = out_img.reshape((px_hh*2+cell_height, px_hw*2+cell_width, 3))
             out_img = resize(out_img, [80, 80, 3],
                              preserve_range=True, anti_aliasing=True)
-            out_values = np.concatenate((self.inventory, pos_feats, dir_features))
-            features = {0: out_img.astype(np.uint8), 1: out_values, 2: self.closer_feature(), 3: img}
+            out_values = np.concatenate((agent.get_items(), pos_feats, dir_features))
+            features = {0: out_img.astype(np.uint8), 1: out_values, 2: self.closer_feature(agent), 3: img}
         else:
             hw = int(self._window_width / 2)
             hh = int(self._window_height / 2)
             bhw = int((self._window_width * self._window_width) / 2)
             bhh = int((self._window_height * self._window_height) / 2)
+            
+            features = {}
+            new_grid = np.concatenate((self.grid, np.zeros((self._width, self._height, len(self.all_agents)-1)))
+                                      , axis=2)
+            # TODO dsleeps: Currently doesn't get the direction of the agents
+            for i, agent in enumerate(self.neural_agents):
+                x, y = agent.pos
+                dir_features = np.zeros(5)
+                dir_features[agent.dir] = 1
+                
+                # Add each other neural agent to the grid
+                grid_copy = copy.deepcopy(new_grid)
+                passed = 0
+                for j, n_agent in enumerate(self.all_agents):
+                    # This skips the current agent
+                    if j == i:
+                        passed = 1
+                        continue
+                    n_x, n_y = n_agent.pos
+                    grid_copy[n_x, n_y, j-passed] = 1
 
-            grid_feats = pad_slice(self.grid, (x-hw, x+hw+1), 
-                    (y-hh, y+hh+1))
-            out_grid = np.concatenate((grid_feats.ravel(),
-                                       self.inventory,
-                                       dir_features))
-            features = {0: out_grid, 1: self.closer_feature()}
+                grid_feats = pad_slice(grid_copy, (x-hw, x+hw+1), 
+                        (y-hh, y+hh+1))
+                out_grid = np.concatenate((grid_feats.ravel(),
+                                           agent.get_items(),
+                                           dir_features))
+                features[2*i] = out_grid
+                features[2*i + 1] = self.closer_feature(agent)
         return features
 
     def reset(self):
-        self._state_visit_count = 0
         self._seq = []
-        self._last_states = set(self.ba.get_initial_state())
-        self.inventory = np.zeros(self.cookbook.n_kinds)
         self.workshop_outs = np.zeros(self.cookbook.n_kinds)
-        self.approaching = []
-        self.pos = copy.deepcopy(self._init_pos)
-        self.dir = copy.deepcopy(self._init_dir)
+        self.approaching = [[]] * len(self.all_agents)
         self.grid = copy.deepcopy(self._init_grid)
+        
+        for agent in self.all_agents:
+            agent.reset()
+
         if self._use_gui:
             self.gui.draw()
+        # TODO: What is self.feature() used for?
         return self.feature()
 
     def visualize(self):
         s = ''
         for y in reversed(range(self._height)):
             for x in range(self._width):
-                if not (self.grid[x, y, :].any() or (x, y) == self.pos):
+                if not (self.get_item(x, y) or (x, y) == self.pos):
                     ch = ' '
                 else:
-                    thing = self.grid[x, y, :].argmax()
+                    thing = self.get_item(x, y)
                     if (x, y) == self.pos:
                         if self.dir == self.actions.left:
                             ch = "<"
@@ -762,9 +866,11 @@ class CraftWorldEnv(gym.Env):
 
     def print_inventory(self):
         print('Current inventory items:')
-        for item, count in enumerate(self.inventory):
-            if count > 0:
-                print('{}: {}'.format(self.cookbook.index.get(item), count))
+        for agent in self.all_agents:
+            print('Agent #' + str(agent.inv_index))
+            for item, count in enumerate(agent.get_items()):
+                if count > 0:
+                    print('{}: {}'.format(self.cookbook.index.get(item), count))
         print('Current workshop outs:')
         for item, count in enumerate(self.workshop_outs):
             if count > 0:
@@ -814,7 +920,7 @@ def check_excluding_formula(formula, alphabets, recipe_path):
                 return False
     return True
 
-
+# TODO dsleeps: Might have to remove the grid.any and replace it with get_item
 def random_free(grid, rand, width, height):
     pos = None
     while pos is None:
@@ -832,9 +938,8 @@ def random_free(grid, rand, width, height):
         pos = (x, y)
     return pos
 
-
+# TODO dsleeps: Might have to remove the grid.any and replace it with get_item
 def sample_craft_env_each(args, width=7, height=7, env_data=None, env=None):
-    #print()
     #print("sample")
     #print(args.formula)
     cookbook = Cookbook(args.recipe_path)
@@ -907,8 +1012,8 @@ def sample_craft_env_each(args, width=7, height=7, env_data=None, env=None):
                 (x, y) = random_free(grid, rand, width, height)
                 grid[x, y, s_env] = 1
         # generate init pos
-        init_pos = random_free(grid, rand, width, height)
-        init_dir = rand.randint(4)
+        init_pos = [random_free(grid, rand, width, height) for i in range(args.neural_agent_num)]
+        init_dir = [rand.randint(4) for i in range(args.neural_agent_num)]
         env_data = (grid, init_pos, init_dir)
     else:
         grid, init_pos, init_dir = env_data
@@ -918,8 +1023,9 @@ def sample_craft_env_each(args, width=7, height=7, env_data=None, env=None):
         env.load(env_data)
         return env
     else:
-        return CraftWorldEnv(args.formula, args.recipe_path,
-                             init_pos, init_dir, grid,
+        return CraftWorldEnv([args.formula] * args.neural_agent_num, args.recipe_path,
+                             init_pos, init_dir, grid, neural_agent_num=args.neural_agent_num,
+                             det_agent_num=args.det_agent_num,
                              width=width, height=height,
                              use_gui=args.use_gui,
                              is_headless=args.is_headless,
@@ -928,13 +1034,12 @@ def sample_craft_env_each(args, width=7, height=7, env_data=None, env=None):
                              target_fps=args.target_fps,
                              update_failed_trans_only=args.update_failed_trans_only)
 
-def bfs(env, goal):
+def bfs(env, goal, agent):
     #print("bfs")
     #print("goal")
     #print(env.cookbook.index.get(goal))
-    #print()
     visited = set()
-    queue = [(env.pos, [])]
+    queue = [(agent.pos, [])]
     delts = env.del2direction.keys()
     while len(queue) > 0:
         curr, curr_seq = queue.pop(0)
@@ -944,13 +1049,13 @@ def bfs(env, goal):
             x_n, y_n = x+d[0], y+d[1]
             if not (x_n in range(env._width) and y_n in range(env._height)):
                 continue
-            if not env.grid[x_n, y_n, :].any():
+            if not env.get_item(x_n, y_n):
                 if (x_n, y_n) not in visited:
                     new_seq = curr_seq.copy()
                     new_seq.append(env.del2direction[d])
                     queue.append(((x_n, y_n), new_seq))
                 continue
-            thing = env.grid[x_n, y_n, :].argmax()
+            thing = env.get_item(x_n, y_n)
             #print(env.cookbook.index.get(goal))
             #print()
             if thing == goal:
@@ -960,7 +1065,7 @@ def bfs(env, goal):
                 return True, curr_seq, env.del2direction[d]
     return False, [], None
 
-def use_item(env, item, drop=True):
+def use_item(env, item, agent, drop=True):
     #print(env.grid)
     item_name = env.cookbook.index.get(item)
     if drop:
@@ -968,7 +1073,7 @@ def use_item(env, item, drop=True):
     if 'none' in item_name:
         item_name = "recycle_" + env.cookbook.output2input[item_name]
     item_idx = env.cookbook.index[item_name]
-    success, seq, last_action = bfs(env, item_idx)
+    success, seq, last_action = bfs(env, item_idx, agent)
     if success:
         return seq
     return []    
@@ -977,12 +1082,13 @@ def get_items(env):
     things = []
     for i in range(env._height):
         for j in range(env._width):
-            if env.grid[i, j, :].any():
-                thing = env.grid[i, j, :].argmax()
+            if env.get_item(i, j):
+                thing = env.get_item(i, j)
                 things.append(thing)
     return things
 
-def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1, for_dataset=False):
+# TODO dsleeps: Not sure if this works right for multiple agents. Maybe this should just be for 1?
+def gen_actions(env, max_n_seq, agent, goal_only=True, n_tracks=1, for_dataset=False):
     '''
         If there are at least n_tracks successful tracks return:
             True, [(actions_1, first_accept_1), (actions_2, first_accept_2), ...]
@@ -1024,34 +1130,38 @@ def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1, for_dataset=False):
                 subtask = [last_waypoint_action]*random_length
             else:
                 #print("sub")
-                items = [i for i in range(len(env.inventory)) if env.inventory[i] > 0]
-                items += [i for i in range(len(env.workshop_outs)) if env.workshop_outs[i] > 0]
+                # Get all of the items in the environment
+                items = [j for j in range(len(agent.get_items())) if agent.get_items()[j] > 0]
+                items += [j for j in range(len(env.workshop_outs)) if env.workshop_outs[j] > 0]
                 items += get_items(env)
                 items = list(filter(lambda x: x not in env.cookbook.workshop_indices, items))
-
-                item = random.choice(items)
-                drop = env.inventory[item] > 0
-                #print([env.cookbook.index.get(i) for i in items])
-                subtask = use_item(env, item, drop=drop)
-                if len(subtask) > 1: 
-                    last_waypoint_action = subtask[-2]
+                
+                # TODO dsleeps: Idk if this is the right thing to do
+                if (len(items) != 0):
+                    item = random.choice(items)
+                    drop = agent.get_items()[item] > 0
+                    #print([env.cookbook.index.get(i) for i in items])
+                    subtask = use_item(env, item, agent, drop=drop)
+                    if len(subtask) > 1: 
+                        last_waypoint_action = subtask[-2]
                 
             subtask = subtask[:diff]
             actions += subtask
 
             #print(subtask)
             for j in range(len(subtask)):
-                action = subtask[j]
+                action = [5] * env.neural_agent_num
+                action[agent.inv_index] = subtask[j]
                 #print()
                 #print("action", action)
-                obs, reward, done, _ = env.step(action)
-
-                #print(reward, done)
+                obs, rewards, done, _ = env.step(action)
+                reward = rewards
+                # reward = rewards[agent.inv_index]
                 if reward < 0.9:
                     found_len = step_j
                 if done:
-                    if (goal_only and reward > 0.9) or (not goal_only and reward > 0):
-                        assert reward > 0.9
+                    if (goal_only and reward < 0.9) or (not goal_only and reward > 0):
+                        # assert reward > 0.9 TODO dsleeps: Why is this assert here?
                         if (for_dataset):
                             return True, (actions, found_len,)
                         else:
@@ -1070,42 +1180,47 @@ def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1, for_dataset=False):
     #    return True, seqs
     return False, []
 
-
+# TODO dsleeps: Not sure if this works for multiple agents
 def sample_craft_env(args, width=7, height=7, n_steps=1, k_path=5,
                      n_retries=5, env_data=None, train=False, check_action=True,
-                     max_n_seq=50, goal_only=True, n_tracks=1, for_dataset=False):
+                     max_n_seq=50, goal_only=True, n_tracks=1, for_dataset=False, 
+                     neural_agent_num=1, det_agent_num=0):
     no_env = True; env = None; count = 0; actions = None
     # exclude the env that is true at beginning
     while no_env:
         env = sample_craft_env_each(args, width, height, env_data, env)
         grid = env.grid
-        #print(grid)
-        #exit()
+        actions = []
         for i in range(k_path):  # try k_path random paths
             #<czw>
             env.reset()
             if i < 5:#test to make sure that no 
-                action = i
-                obs, reward, done, _ = env.step(action)
-                no_env = reward > 0.5 #or (j == 0 and done)
+                action = [i] * args.neural_agent_num
+                obs, rewards, done, _ = env.step(action)
+                rewards = [rewards]
+                no_env = sum(rewards) > 0.5 * len(rewards) #or (j == 0 and done) #TODO dsleeps: This is bad
                 if no_env:
                     break
             #</czw>
             env.reset()
             for j in range(n_steps):
-                action = np.random.choice(5)
-                obs, reward, done, _ = env.step(action)
+                action = [np.random.choice(5) for k in range(args.neural_agent_num)]
+                obs, rewards, done, _ = env.step(action)
+                rewards = [rewards]
                 # not sample an env if too easy or fail at first step
-                no_env = reward > 0.5 #or (j == 0 and done)
+                no_env = sum(rewards) > 0.5 * len(rewards) #or (j == 0 and done) #TODO dsleeps: This is bad
                 if no_env:
                     break
             if no_env:
                 break
         if not no_env and check_action:  # filter out the env that doesn't have a solution
-            env.reset()
-            success, actions = gen_actions(env, max_n_seq=max_n_seq, goal_only=goal_only, n_tracks=1, for_dataset=for_dataset)
-            if not success:
-                no_env = True
+            for i in range(args.neural_agent_num):
+                env.reset() # TODO dsleeps: Fix this gen_actions thing
+                success, agent_actions = gen_actions(env, max_n_seq=max_n_seq, agent=env.neural_agents[i], 
+                                               goal_only=goal_only, n_tracks=1, for_dataset=for_dataset)
+                actions.append(agent_actions)
+                if not success:
+                    no_env = True
         count += 1
         if count > n_retries:  # retry too many times
             break
@@ -1113,7 +1228,7 @@ def sample_craft_env(args, width=7, height=7, n_steps=1, k_path=5,
         env.should_skip = True
     env.reset()
     if not train and no_env:
-        return None, []
+        return None, [[]] * neural_agent_num
     else:
         return env, actions
 
@@ -1139,13 +1254,17 @@ if __name__ == '__main__':
     args.use_gui = False
     args.is_headless = True
     # args.formula = "( G ( tree ) )"#NOTE dummy formula
+    # args.formula = "(( tree ) U ! ( blue ) )"
     args.formula = "( F ( tree ) )"
     args.prefix_reward_decay = 0.8
     args.update_failed_trans_only = False
     args.return_screen = False
-    env, actions = sample_craft_env(args, n_steps=3, n_retries=5, train=True)
+    args.neural_agent_num = 1
+    args.det_agent_num = 2
+    env, actions = sample_craft_env(args, n_steps=3, n_retries=10, train=True, neural_agent_num=2, det_agent_num=5)
     if env is None: exit()
-    env.ba.draw('tmp_images/ba.svg', show=False)
+    for i, agent in enumerate(env.neural_agents):
+        agent.ba.draw('tmp_images/agent_' + str(i) + '_ba.svg', show=False)
     '''
     while True:
         env.gui.draw(move_first=True)

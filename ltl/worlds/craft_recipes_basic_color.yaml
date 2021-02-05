@@ -5,14 +5,12 @@ environment:
   - recycle_iron
   - recycle_gold
   - recycle_gem
-  - recycle_copper
   - color_swap_blue
 
 primitives:
   - iron
   - gold
   - gem
-  - copper
 
 recipes:
   none0:

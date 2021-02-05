@@ -6,7 +6,7 @@ from easydict import EasyDict as edict
 from itertools import combinations
 from ltl.ltl2tree import *
 from ltl.spot2ba import Automaton
-
+from language.generator_refactored import gen_ltl_example
 
 def add_basic_ltl(alphabets, add_flexible_state):
     ltls = []
@@ -114,6 +114,7 @@ def check_should_add(ltl, ba, include_templates, skip_templates, env_name=''):
             ba.n_states > 1 and \
             ltlstr2template(ltl) not in skip_templates:
         if env_name == 'Craft':
+            # TODO dsleeps: Fix these args, make them not hard coded
             args = edict({
                     'recipe_path': 'worlds/craft_recipes_basic.yaml',
                     'formula': ltl,
@@ -122,7 +123,9 @@ def check_should_add(ltl, ba, include_templates, skip_templates, env_name=''):
                     'target_fps': None,
                     'use_gui': False,
                     'is_headless': True,
-                    'update_failed_trans_only': False
+                    'update_failed_trans_only': False,
+                    'neural_agent_num': 1,
+                    'det_agent_num': 2
                 })
             env, _ = craft.sample_craft_env(args, n_retries=5, max_n_seq=100, goal_only=False)
             if env is None:
@@ -148,7 +151,7 @@ def ltl_sampler(alphabets, env_name='',
         n_accept = 10**17  # for 5 symbols
     elif len(filtered_alphabets) == 6:
         n_accept = 10**33  # for 6 symbols, 20 steps
-    elif len(filtered_alphabets) == 7:
+    elif len(filtered_alphabets) == 7 or len(filtered_alphabets) == 8: # TODO: Should I have added 8?
         n_accept = 10**27  # for craft, 7 symbols
     elif len(filtered_alphabets) == 9:
         n_accept = 10**38  # for 9 symbols
@@ -166,7 +169,9 @@ def ltl_sampler(alphabets, env_name='',
         print('Generate {}th formula'.format(i))
         while True:
             # generate LTL formula (including its pair)
-            ltl = generate_ltl(cfg, env_name=env_name)
+            # NOTE: I'm generating ltl using my generator
+            # ltl = generate_ltl(cfg, env_name=env_name)
+            ltl = gen_ltl_example() 
             symbols = [s for s in ltl.split(' ') if s != ')' and s != '(']
             sym_alphabets = [s for s in symbols if s in alphabets]
             # restrict craft max symbols to be 6 since spot may slow down at 12
@@ -176,7 +181,7 @@ def ltl_sampler(alphabets, env_name='',
                 considered.add(ltl)
                 continue
             ba = Automaton(ltl, filtered_alphabets)
-            #print(' consider', ltl, ba.num_accept_str(n_steps))
+            # print(' consider', ltl, ba.num_accept_str(n_steps))
             if ba.n_states <= 1 or \
                     ltl in considered or \
                     ba.num_accept_str(n_steps) > n_accept or \

@@ -4,8 +4,8 @@ import ltl.worlds.craft_world as craft
 import re
 
 from collections import defaultdict
-
-
+ 
+# S -> Safety | Guarantee | Obligation | Recurrence | Persistence | Reactivity | Conditional
 # TODO: add `grass` and `toolshed` back
 GRAMMAR = """
     BinOp -> 'and' | 'or'
@@ -18,7 +18,7 @@ GRAMMAR = """
     Predicate -> 'be around the' Landmark | 'be near the' Landmark | 'go to the' Landmark | 'hold the' Item | 'take the' Item | 'possess the' Item
     pp -> Predicate | Predicate BinOp Predicate
     p -> Predicate | Predicate BinOp Predicate | UOp pp
-    S -> Safety | Guarantee | Obligation | Recurrence | Persistence | Reactivity | Conditional
+    S -> Safety | Guarantee | Obligation | Recurrence | Persistence | Reactivity
     SPrefix -> 'always' | 'at all times,'
     SSuffix -> 'forever' | 'at all times' | 'all the time'
     Safety -> SPrefix p | p SSuffix | Safety BinOp Safety
@@ -43,7 +43,7 @@ LTL_GRAMMAR = """
     Predicate -> Landmark | Landmark | Landmark | Item | Item | Item
     pp -> Predicate | Predicate BinOp Predicate
     p -> Predicate | Predicate BinOp Predicate | UOp pp
-    S -> Safety | Guarantee | Obligation | Recurrence | Persistence | Reactivity | Conditional
+    S -> Safety | Guarantee | Obligation | Recurrence | Persistence | Reactivity
     SPrefix -> 'F' | 'F'
     SSuffix -> 'F' | 'F' | 'F'
     Safety -> SPrefix '(' p ')' | SSuffix '(' p ')' | '(' Safety ')' BinOp '(' Safety ')'
@@ -97,7 +97,7 @@ class TreeNode:
                 new_list.append(elem)
         return new_list
     
-    def create_weights(self, pcount, excludes=[]):
+    def create_weights(self, pcount, excludes=[], cfactor=0.25):
         weights = []
         for i, p in enumerate(self.prod[self.get_symbol()]):
             skip = False
@@ -122,6 +122,7 @@ class TreeNode:
                 return i
     
     # TODO: Excludes is currently not being used
+    # TODO: Update pcount
 
     # Creates a tree using the value passed in
     def create_tree(self, pcount=defaultdict(int), excludes=[], sim_node=None):
@@ -134,9 +135,12 @@ class TreeNode:
             weights = self.create_weights(pcount, excludes)
         
         self.value = []
+        rand_prod = ''
         if (not sim_node):
             self.choice = self.weighted_choice(weights)
-            self.value = self.split_cfg(self.prod[self.get_symbol()][self.choice])
+            rand_prod = self.prod[self.get_symbol()][self.choice]
+            pcount[rand_prod] += 1
+            self.value = self.split_cfg(rand_prod)
         else:
             self.value = self.split_cfg(self.prod[self.get_symbol()][sim_node.choice])
         for i, v in enumerate(self.value):
@@ -160,6 +164,9 @@ class TreeNode:
                     node = TreeNode(node_name, self.grammar, self.prod)
                     node.create_tree(sim_node=next_node)
                     self.value[i] = node
+
+        # Backtracking: clear the modification to pcount    
+        pcount[rand_prod] -= 1
 
     # Returns the sentence
     def __str__(self):
@@ -297,20 +304,34 @@ class SentenceGrammar(object):
         sentences = []
         for i in range(n):
             choices = defaultdict(list)
-            sentence = self.gen_random('S', self._prod, choices=choices)
-            formula = self.gen_random('S', self._ltl_prod, choices=choices, is_formula=True)
+            node = TreeNode('S', self.grammar, self._prod)
+            node.create_tree()
+            ltl_node = TreeNode('S', self.ltl_grammar, self._ltl_prod)
+            ltl_node.create_tree(sim_node=node)
+            sentence = str(node) 
+            formula = str(ltl_node)
             sentences.append((sentence, formula))
         return sentences
 
+def gen_ltl_example():
+    grammar = SentenceGrammar('/storage/dsleeper/RL_Parser/ltl/ltl/worlds/craft_recipes_basic_color.yaml')
+    choices = defaultdict(list)
+    node = TreeNode('S', grammar.grammar, grammar._prod)
+    node.create_tree()
+    ltl_node = TreeNode('S', grammar.ltl_grammar, grammar._ltl_prod)
+    ltl_node.create_tree(sim_node=node)
+    return str(ltl_node)
 
 if __name__ == '__main__':
     grammar = SentenceGrammar('/storage/dsleeper/RL_Parser/ltl/ltl/worlds/craft_recipes_basic_color.yaml')
-    node = TreeNode('Safety', grammar.grammar, grammar._prod)
-    node.create_tree()
-    print(str(node))
-    ltl_node = TreeNode('Safety', grammar.ltl_grammar, grammar._ltl_prod)
-    ltl_node.create_tree(sim_node=node)
-    print(str(ltl_node))
+    for i in range(10):
+        node = TreeNode('S', grammar.grammar, grammar._prod)
+        node.create_tree()
+        print(str(node))
+        ltl_node = TreeNode('S', grammar.ltl_grammar, grammar._ltl_prod)
+        ltl_node.create_tree(sim_node=node)
+        print(str(ltl_node))
+        
 
     '''
     for sentence, formula in grammar.gen_sentence(n=10):
