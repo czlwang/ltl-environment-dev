@@ -699,6 +699,7 @@ class CraftWorldEnv(gym.Env):
                         components = components.union(self._anno_maps[symbol])
             info = {'failed_components': components}
         
+        # print(rewards)
         # TODO dsleeps: For now just return one of the rewards  
         return self.feature(), rewards[0], done, info
     
@@ -826,7 +827,6 @@ class CraftWorldEnv(gym.Env):
         return features
 
     def reset(self):
-        self._seq = []
         self.workshop_outs = np.zeros(self.cookbook.n_kinds)
         self.approaching = [[]] * len(self.all_agents)
         self.grid = copy.deepcopy(self._init_grid)

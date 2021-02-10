@@ -54,6 +54,7 @@ class NeuralAgent(Agent):
 
     def reset(self):
         super().reset()
+        self.seq = []
         self.state_visit_count = 0
         self.last_states = set(self.ba.get_initial_state())
 
