@@ -7,5 +7,6 @@ Environment grid world for [Encoding formulas as deep networks: Reinforcement le
 * `language/` contains the code to generate a dataset of (sentence, formula, environment) examples 
   * usage: `language/dataset.py --n_sentence 10 --dataset_path examples_out`
 * `worlds/craft_world.py` contains all the rules of the craft world environment as well as it's GUI
+  * usage: `worlds/craft_world.py` to obtain an GUI
 * `spot2ba.py` contains the hooks into [Spot](https://spot.lrde.epita.fr/) needed to maintain the FSA
 * `ltl2tree.py` contains the code that specifies the tree structure of the planner model. This tree is formed according to the parse of the given LTL formula.
