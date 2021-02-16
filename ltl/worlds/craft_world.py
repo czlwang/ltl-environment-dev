@@ -1004,8 +1004,8 @@ def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1):
                 if done:
                     if (goal_only and reward > 0.9) or (not goal_only and reward > 0):
                         assert reward > 0.9
-                        return True, actions
-                        #seqs.append((actions, found_len))#TODO change back
+                        #return True, actions
+                        seqs.append((actions, found_len))
                 step_j += 1
                 #print(env._formula)
                 if reward < 0:
@@ -1014,14 +1014,15 @@ def gen_actions(env, max_n_seq, goal_only=True, n_tracks=1):
                     break
             if violated:
                 break
-    #if len(seqs) > n_tracks:#TODO change back
-    #    seqs = list(sorted(seqs, key=lambda x: x[1])) #NOTE: not needed anymore?
-    #    return True, seqs
+    if len(seqs) > n_tracks:
+        seqs = list(sorted(seqs, key=lambda x: x[1])) #NOTE: not needed anymore?
+        return True, seqs
     return False, []
 
 
 def sample_craft_env(args, width=7, height=7, n_steps=1, k_path=5,
-                     n_retries=5, env_data=None, train=False, check_action=True,
+                     n_retries=5, env_data=None, train=False, 
+                     check_action=True,
                      max_n_seq=50, goal_only=True, n_tracks=1):
     no_env = True; env = None; count = 0; actions = None
     # exclude the env that is true at beginning

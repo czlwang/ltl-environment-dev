@@ -1,6 +1,7 @@
 import argparse
 import json
 import numpy as np
+import os
 import random
 
 from collections import defaultdict
@@ -17,7 +18,9 @@ def gen_env(args, formula, n_trials=3):
     trial = 0
     envs, action_list = [], []
     while trial < n_trials:
-        env, actions = sample_craft_env(args, max_n_seq=100, goal_only=True, k_path=5, height=7, width=7, n_tracks=1)
+        env, actions = sample_craft_env(args, max_n_seq=100, 
+                                        goal_only=True, k_path=5, 
+                                        height=7, width=7, n_tracks=1)
         if env is None:
             trial += 1
             success = False; actions = []
@@ -120,6 +123,8 @@ def save_dataset_json(dataset, args):
                 'envs': env_d,
                 'actions': actions_d}
         output['data'].append(data)
+    if not os.path.isdir("data"):
+        os.mkdir("data")
     with open(json_path, 'w') as json_file:
         json.dump(output, json_file, indent=4)
 
@@ -141,8 +146,9 @@ if __name__ == '__main__':
     args.is_headless = True
     args.update_failed_trans_only = False
     args.n_trials = 20
-    args.n_envs = 10
+    args.n_envs = 3
     args.num_steps = 20
+    args.n_sentence = 1
     # generate dataset
     dataset = gen_dataset(args, n=args.n_sentence)
     save_dataset_json(dataset, args)
