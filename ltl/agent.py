@@ -21,12 +21,24 @@ class Agent:
     
     def take_action(self, grid=[], cookbook={}):
         pass
+    
+    def move(self, x, y, grid=[], cookbook={}):
+        padded = np.zeros(grid.shape[2])
+        padded[:self.inventory.shape[0]] = self.inventory
+
+        # Remove the elements from the grid in agents inventory and add them to the new
+        # position of the agent
+        grid[self.pos[0],self.pos[1],:] -= padded
+        grid[x,y,:] += padded
+
+        self.pos = (x, y)
 
     def get_items(self):
         return self.inventory
     
-    def add_items(self, item_index, count=1):
+    def add_items(self, item_index, grid, count=1):
         self.inventory[item_index] += count
+        grid[self.pos[0], self.pos[1], item_index] += count
     
     def remove_items(self, item_index, count=1):
         self.inventory[item_index] = max(0, self.inventory[item_index] - count)

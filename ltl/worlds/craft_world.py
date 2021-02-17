@@ -262,8 +262,7 @@ class CraftGui(object):
                                 picture = pygame.transform.scale(self._sprites['up_empty'], cell_size)
                             else:
                                 picture = pygame.transform.scale(self._sprites['down_empty'], cell_size)
-                            break
-                    elif thing == self._env.cookbook.get_index("boundary"):
+                    if thing == self._env.cookbook.get_index("boundary"):
                         if row == 0:
                             picture = pygame.transform.scale(self._sprites['boundary_top'], cell_size)
                         elif row == self._height - 1:
@@ -603,7 +602,7 @@ class CraftWorldEnv(gym.Env):
                             thing == self.cookbook.stone_index):
                         continue
                     if thing in self.cookbook.grabbable_indices:
-                        agent.get_items()[thing] += 1
+                        agent.add_items(thing, self.grid)
                         self.grid[nx, ny, thing] = 0
                         success = True
                     elif thing in self.cookbook.workshop_indices:
