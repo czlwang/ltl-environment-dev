@@ -391,6 +391,7 @@ class CraftWorldEnv(gym.Env):
         self._window_width = window_width
         self._window_height = window_height
         self.grid = copy.deepcopy(grid)
+        # TODO dsleeps: Neural agent num does nothing, for now only support one agent
         self.neural_agent_num = int(neural_agent_num)
         self.det_agent_num = int(det_agent_num)
 
@@ -419,16 +420,22 @@ class CraftWorldEnv(gym.Env):
         if (type(init_dir) != list):
             init_dir = [init_dir]
 
-        self.neural_agents = [Agent.NeuralAgent(init_pos[i], init_dir[i], 
-                                                self.inventories[i], i, 'Agent_' + str(i) + '_',
-                                                self._formulas[i], 
-                                                self.bas[i]) for i in range(self.neural_agent_num)]
+        self.neural_agent = Agent.NeuralAgent(init_pos[0], init_dir[0], 
+                                              self.inventories[0], 0, 'Agent_0_',
+                                              self._formulas[0], 
+                                              self.bas[0])
         
         self.det_agents = []
-        i = len(self.neural_agents)
+        i = 1
         while (len(init_pos) != i):
-            self.det_agents.append(Agent.RandomAgent(init_pos[i], init_dir[i], self.inventories[i], i, 
-                                                    'Agent_' + str(i) + '_', False))
+            agent_type = np.random.choice(Agent.AgentTypes)
+            if (agent_type == 'Random'):
+                self.det_agents.append(Agent.RandomAgent(init_pos[i], init_dir[i], self.inventories[i], i, 
+                                                        'Agent_' + str(i) + '_', False))
+            elif (agent_type == 'Pickup'):
+                self.det_agents.append(Agent.PickupAgent(init_pos[i], init_dir[i], self.inventories[i], i, 
+                                                        'Agent_' + str(i) + '_', 
+                                                        self._width, self._height, False))
             i += 1
         
         # If positions haven't been specified for all of the non-neural agents
@@ -437,13 +444,19 @@ class CraftWorldEnv(gym.Env):
             r_pos = (np.random.randint(self._width), np.random.randint(self._height))
             if (self.get_item(r_pos[0], r_pos[1]) == 0):
                 # self.Actions - 1 ensures that I don't accidentally get a use action
-                self.det_agents.append( \
-                     Agent.RandomAgent(r_pos, np.random.randint(len(self.Actions)-1), self.inventories[i], i, 
-                                       'Agent_' + str(i) + '_', False))
+                agent_type = np.random.choice(Agent.AgentTypes)
+                if (agent_type == 'Random'):
+                    self.det_agents.append( \
+                         Agent.RandomAgent(r_pos, np.random.randint(len(self.Actions)-1), self.inventories[i], 
+                                           i, 'Agent_' + str(i) + '_', False))
+                elif (agent_type == 'Pickup'):
+                    self.det_agents.append( \
+                         Agent.PickupAgent(r_pos, np.random.randint(len(self.Actions)-1), self.inventories[i], 
+                                           i, 'Agent_' + str(i) + '_', self._width, self._height, False))
                 i += 1
         
         # A list combining the two
-        self.all_agents = self.neural_agents + self.det_agents
+        self.all_agents = [self.neural_agent] + self.det_agents
         
         if (do_reset):
             self.reset()
@@ -482,9 +495,6 @@ class CraftWorldEnv(gym.Env):
                 here = self.grid[nx, ny, :]
                 if not self.get_item(nx, ny):
                     continue
-                # TODO: With something like color these asserts no longer make any sense
-                # assert np.count_nonzero(here) == 1
-                # TODO: The argmax call no longer works because two things can be in the same
                 thing = here.argmax()
                 if thing in self.cookbook.environment:
                     if 'recycle' in self.cookbook.index.get(thing):
@@ -557,7 +567,7 @@ class CraftWorldEnv(gym.Env):
             if (agent.is_neural):
                 agent_action = action[i]
             else:
-                agent_action = agent.take_action()
+                agent_action = agent.take_action(self.grid, self.cookbook)
             n_dir = agent_action
 
             if agent_action == self.actions.left:
@@ -582,7 +592,6 @@ class CraftWorldEnv(gym.Env):
             x = x + dx
             y = y + dy
 
-            # TODO: Should agents be able to be in the same square?
             if x in range(0, self._width) and y in range(0, self._height) and \
                not self.get_item(x, y) and not (x, y) in [a.pos for a in self.all_agents]:
                 agent.pos = (x, y)
@@ -652,39 +661,33 @@ class CraftWorldEnv(gym.Env):
 
         # get predicates
         trans = self.predicates(prev_ds, prev_inv, prev_workshop_outs, prev_approaching)
-        for agent in self.neural_agents:
-            # Filter out the preds with agent_str in front for the autonoma
-            agent.seq.append(self.filter_predicates(trans, agent))
+        self.neural_agent.seq.append(self.filter_predicates(trans, agent))
         
-        # They should all be the same length so we can just check the first
-        done = len(self.neural_agents[0].seq) >= self.time_limit
+        done = len(self.neural_agent.seq) >= self.time_limit
         
         # check if it is prefix or accepting state
-        rewards = []
-        for agent in self.neural_agents:
-            reward = 0
-            is_prefix, dist_to_accept, last_states, failed_trans = \
-                    agent.ba.is_prefix([agent.seq[-1]], agent.last_states)
-            is_accept = is_prefix and dist_to_accept < 0.1
-            if is_accept:  # not done even if it is in accept state
-                reward = 1
-                agent.last_states = set([s for s in last_states if agent.ba.is_accept(s)])
-            elif is_prefix:
-                if len(last_states.intersection(agent.last_states)) > 0:
-                    agent.state_visit_count += 1
-                else:
-                    agent.state_visit_count = 1
-                agent.last_states = last_states
-                if agent.state_visit_count == 1:
-                    reward = 0.1
-                else:
-                    reward = 0.1 * (self.prefix_reward_decay ** (agent.state_visit_count - 1))
+        reward = 0
+        is_prefix, dist_to_accept, last_states, failed_trans = \
+                self.neural_agent.ba.is_prefix([self.neural_agent.seq[-1]], self.neural_agent.last_states)
+        is_accept = is_prefix and dist_to_accept < 0.1
+        if is_accept:  # not done even if it is in accept state
+            reward = 1
+            self.neural_agent.last_states = set([s for s in last_states if self.neural_agent.ba.is_accept(s)])
+        elif is_prefix:
+            if len(last_states.intersection(self.neural_agent.last_states)) > 0:
+                self.neural_agent.state_visit_count += 1
             else:
-                reward = -1
-                done = True
-            if done and reward < 0.2:  # penalize if reaching time limit but not accept
-                reward = -1
-            rewards.append(reward)
+                self.neural_agent.state_visit_count = 1
+            self.neural_agent.last_states = last_states
+            if self.neural_agent.state_visit_count == 1:
+                reward = 0.1
+            else:
+                reward = 0.1 * (self.prefix_reward_decay ** (self.neural_agent.state_visit_count - 1))
+        else:
+            reward = -1
+            done = True
+        if done and reward < 0.2:  # penalize if reaching time limit but not accept
+            reward = -1
         
         if self._use_gui:
             self.gui.draw()
@@ -700,8 +703,7 @@ class CraftWorldEnv(gym.Env):
             info = {'failed_components': components}
         
         # print(rewards)
-        # TODO dsleeps: For now just return one of the rewards  
-        return self.feature(), rewards[0], done, info
+        return self.feature(), reward, done, info
     
     # Have to update this function for every element that isn't an "item"
     def get_item(self, x, y):
@@ -800,30 +802,31 @@ class CraftWorldEnv(gym.Env):
             features = {}
             new_grid = np.concatenate((self.grid, np.zeros((self._width, self._height, len(self.all_agents)-1)))
                                       , axis=2)
+            
             # TODO dsleeps: Currently doesn't get the direction of the agents
-            for i, agent in enumerate(self.neural_agents):
-                x, y = agent.pos
-                dir_features = np.zeros(5)
-                dir_features[agent.dir] = 1
-                
-                # Add each other neural agent to the grid
-                grid_copy = copy.deepcopy(new_grid)
-                passed = 0
-                for j, n_agent in enumerate(self.all_agents):
-                    # This skips the current agent
-                    if j == i:
-                        passed = 1
-                        continue
-                    n_x, n_y = n_agent.pos
-                    grid_copy[n_x, n_y, j-passed] = 1
+            i = 0
+            x, y = self.neural_agent.pos
+            dir_features = np.zeros(5)
+            dir_features[self.neural_agent.dir] = 1
+            
+            # Add each other neural agent to the grid
+            grid_copy = copy.deepcopy(new_grid)
+            passed = 0
+            for j, n_agent in enumerate(self.all_agents):
+                # This skips the current agent
+                if j == i:
+                    passed = 1
+                    continue
+                n_x, n_y = n_agent.pos
+                grid_copy[n_x, n_y, j-passed] = 1
 
-                grid_feats = pad_slice(grid_copy, (x-hw, x+hw+1), 
-                        (y-hh, y+hh+1))
-                out_grid = np.concatenate((grid_feats.ravel(),
-                                           agent.get_items(),
-                                           dir_features))
-                features[2*i] = out_grid
-                features[2*i + 1] = self.closer_feature(agent)
+            grid_feats = pad_slice(grid_copy, (x-hw, x+hw+1), 
+                    (y-hh, y+hh+1))
+            out_grid = np.concatenate((grid_feats.ravel(),
+                                       self.neural_agent.get_items(),
+                                       dir_features))
+            features[2*i] = out_grid
+            features[2*i + 1] = self.closer_feature(self.neural_agent)
         return features
 
     def reset(self):
@@ -1152,32 +1155,24 @@ def gen_actions(env, max_n_seq, agent, goal_only=True, n_tracks=1, for_dataset=F
             for j in range(len(subtask)):
                 action = [5] * env.neural_agent_num
                 action[agent.inv_index] = subtask[j]
-                #print()
-                #print("action", action)
                 obs, rewards, done, _ = env.step(action)
                 reward = rewards
-                # reward = rewards[agent.inv_index]
+                # reward = rewards[agent.inv_index] # TODO dsleeps: Make this work with multiple agents
                 if reward < 0.9:
                     found_len = step_j
                 if done:
                     if (goal_only and reward < 0.9) or (not goal_only and reward > 0):
-                        # assert reward > 0.9 TODO dsleeps: Why is this assert here?
                         if (for_dataset):
                             return True, (actions, found_len,)
                         else:
                             return True, actions
                         #seqs.append((actions, found_len))#TODO change back
                 step_j += 1
-                #print(env._formula)
                 if reward < 0:
-                    #print("violated")
                     violated = True
                     break
             if violated:
                 break
-    #if len(seqs) > n_tracks:#TODO change back
-    #    seqs = list(sorted(seqs, key=lambda x: x[1])) #NOTE: not needed anymore?
-    #    return True, seqs
     return False, []
 
 # TODO dsleeps: Not sure if this works for multiple agents
@@ -1214,13 +1209,12 @@ def sample_craft_env(args, width=7, height=7, n_steps=1, k_path=5,
             if no_env:
                 break
         if not no_env and check_action:  # filter out the env that doesn't have a solution
-            for i in range(args.neural_agent_num):
-                env.reset() # TODO dsleeps: Fix this gen_actions thing
-                success, agent_actions = gen_actions(env, max_n_seq=max_n_seq, agent=env.neural_agents[i], 
-                                               goal_only=goal_only, n_tracks=1, for_dataset=for_dataset)
-                actions.append(agent_actions)
-                if not success:
-                    no_env = True
+            env.reset()
+            success, agent_actions = gen_actions(env, max_n_seq=max_n_seq, agent=env.neural_agent, 
+                                           goal_only=goal_only, n_tracks=1, for_dataset=for_dataset)
+            actions.append(agent_actions)
+            if not success:
+                no_env = True
         count += 1
         if count > n_retries:  # retry too many times
             break
@@ -1263,8 +1257,7 @@ if __name__ == '__main__':
     args.det_agent_num = 2
     env, actions = sample_craft_env(args, n_steps=3, n_retries=10, train=True, neural_agent_num=2, det_agent_num=5)
     if env is None: exit()
-    for i, agent in enumerate(env.neural_agents):
-        agent.ba.draw('tmp_images/agent_' + str(i) + '_ba.svg', show=False)
+    env.neural_agent.ba.draw('tmp_images/agent_' + str(0) + '_ba.svg', show=False)
     '''
     while True:
         env.gui.draw(move_first=True)
