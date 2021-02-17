@@ -196,14 +196,11 @@ class CraftGui(object):
                     self._sprites[bin_name+"_empty"] = pygame.image.load(img_path + bin_name + '_empty.png')
                 else:
                     self._sprites[item] = pygame.image.load(img_path + item + '.png')
-        for direction in ['left', 'right', 'up', 'down']:
-            #combos = ['apple', 'apple_orange', 'apple_pear', 'all', 'empty', 'orange', 'orange_pear', 'pear']
-            combos = ['gem', 'gem_gold', 'gem_iron', 'all', 'empty', 'gold', 'gold_iron', 'iron']
-            for combo in combos:
-                filename = img_path +  direction + "_" + combo + '.png'
-                d = self._sprites.get(direction, {})
-                d[combo] = pygame.image.load(filename)
-                self._sprites[direction] = d
+
+        # Load the agent images
+        for direction in ['left', 'right', 'top', 'bottom']:
+            self._sprites[direction + '_empty'] = pygame.image.load(img_path + direction + '_empty.png')
+
         # pygame related
         self._target_fps = target_fps
         self._screen = pygame.display.set_mode((width_px, height_px), 0, 32)
@@ -218,20 +215,20 @@ class CraftGui(object):
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_UP:
                     print(self._env.actions.up)
-                    obs, reward, done, _ = self._env.step(self._env.actions.up)
+                    obs, reward, done, _ = self._env.step([self._env.actions.up])
                 elif event.key == pygame.K_DOWN:
                     print(self._env.actions.down)
-                    obs, reward, done, _ = self._env.step(self._env.actions.down)
+                    obs, reward, done, _ = self._env.step([self._env.actions.down])
                 elif event.key == pygame.K_LEFT:
                     print(self._env.actions.left)
-                    obs, reward, done, _ = self._env.step(self._env.actions.left)
+                    obs, reward, done, _ = self._env.step([self._env.actions.left])
                 elif event.key == pygame.K_RIGHT:
                     print(self._env.actions.right)
-                    obs, reward, done, _ = self._env.step(self._env.actions.right)
+                    obs, reward, done, _ = self._env.step([self._env.actions.right])
                 elif event.key == pygame.K_SPACE:
                     #print("about to step*******")
                     print(self._env.actions.use)
-                    obs, reward, done, _ = self._env.step(self._env.actions.use)
+                    obs, reward, done, _ = self._env.step([self._env.actions.use])
                     #print("use")
                     self._env.print_inventory()
                     #exit()
@@ -255,30 +252,17 @@ class CraftGui(object):
                 pygame.draw.rect(self._screen, (00,00,00), rect, 2)
                 if self._env.get_item(x, y) or (x, y) == self._env.pos:
                     thing = self._env.get_item(x, y)
-                    if (x, y) == self._env.pos:
-                        #objs = self.
-                        obj_str = ''
-                        #for obj in ["apple", "orange", "pear"]:
-                        for obj in ["gem", "gold", "iron"]:
-                            obj_idx = self._env.cookbook.index[obj]
-                            if self._env.inventory[obj_idx] > 0:
-                                obj_str += obj+"_"
-                        obj_str = obj_str[:-1]
-                        if len(obj_str) == 0:
-                            obj_str = 'empty'
-                        #if obj_str == 'apple_orange_pear':
-                        if obj_str == 'gem_gold_iron':
-                            obj_str = 'all'
-                        #dir_sprite_dict = self._sprite[self._env.dir]:
-                        #    obj_dir_sprite = dir_sprite_dict[objs]
-                        if self._env.dir == self._env.actions.left:
-                            picture = pygame.transform.scale(self._sprites['left'][obj_str], cell_size)
-                        elif self._env.dir == self._env.actions.right:
-                            picture = pygame.transform.scale(self._sprites['right'][obj_str], cell_size)
-                        elif self._env.dir == self._env.actions.up:
-                            picture = pygame.transform.scale(self._sprites['up'][obj_str], cell_size)
-                        elif self._env.dir == self._env.actions.down:
-                            picture = pygame.transform.scale(self._sprites['down'][obj_str], cell_size)
+                    for agent in self._env.all_agents:
+                        if (x, y) == agent.pos:
+                            if (agent.dir == CraftWorldEnv.Actions.left):
+                                picture = pygame.transform.scale(self._sprites['left_empty'], cell_size)
+                            if (agent.dir == CraftWorldEnv.Actions.right):
+                                picture = pygame.transform.scale(self._sprites['right_empty'], cell_size)
+                            if (agent.dir == CraftWorldEnv.Actions.up):
+                                picture = pygame.transform.scale(self._sprites['up_empty'], cell_size)
+                            else:
+                                picture = pygame.transform.scale(self._sprites['down_empty'], cell_size)
+                            break
                     elif thing == self._env.cookbook.get_index("boundary"):
                         if row == 0:
                             picture = pygame.transform.scale(self._sprites['boundary_top'], cell_size)
