@@ -124,8 +124,7 @@ def check_should_add(ltl, ba, include_templates, skip_templates, env_name=''):
                     'use_gui': False,
                     'is_headless': True,
                     'update_failed_trans_only': False,
-                    'neural_agent_num': 1,
-                    'det_agent_num': 2
+                    'neural_agent_num': 1
                 })
             env, _ = craft.sample_craft_env(args, n_retries=5, max_n_seq=100, goal_only=False)
             if env is None:

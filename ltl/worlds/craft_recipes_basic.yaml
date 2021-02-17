@@ -13,6 +13,10 @@ primitives:
   - gem
   - copper
 
+det_agents:
+  - Pickup_Thief
+  - Random_Move
+
 recipes:
   none0:
     iron: 1

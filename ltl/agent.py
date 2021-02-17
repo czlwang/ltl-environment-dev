@@ -35,7 +35,6 @@ class Agent:
         self.inventory[:] = 0
 
     def reset(self):
-        print('reset')
         self.pos = copy.deepcopy(self._init_pos)
         self.dir = copy.deepcopy(self._init_dir)
         self.clear_inventory()
@@ -56,7 +55,6 @@ class NeuralAgent(Agent):
         print('This should not be called for a neural agent')
 
     def reset(self):
-        super().reset()
         self.seq = []
         self.state_visit_count = 0
         self.last_states = set(self.ba.get_initial_state())

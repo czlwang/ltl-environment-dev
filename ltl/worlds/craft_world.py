@@ -98,6 +98,11 @@ class Cookbook(object):
         self.index = Index()
         self.environment = set(self.get_index(e) for e in recipes["environment"])
         self.primitives = set(self.get_index(p) for p in recipes["primitives"])
+        # The word after the underscore is the name of the agent
+        self.det_agents = [self.get_index(det_agent.split("_")[1]) for det_agent in recipes["det_agents"]]
+        self.det_agent_types = [det_agent.split("_")[0] for det_agent in recipes["det_agents"]]
+        self.det_agent_names = [det_agent.split("_")[1] for det_agent in recipes["det_agents"]]
+
         self.recipes = {}
         self.original_recipes = recipes
         self.output2input = {} #maps none0, none2, none3 to input items
@@ -315,7 +320,7 @@ class CraftWorldEnv(gym.Env):
         use   = 5 # use
 
     def __init__(self, formulas, recipe_path,
-                 init_pos, init_dir, grid, neural_agent_num=1, det_agent_num=1,
+                 init_pos, init_dir, grid, neural_agent_num=1,
                  width=7, height=7, window_width=5, window_height=5,
                  prefix_reward_decay=1., time_limit=10,
                  use_gui=True, target_fps=None, is_headless=False,
@@ -354,7 +359,7 @@ class CraftWorldEnv(gym.Env):
         else:
             self.n_features = \
                 window_width * window_height * \
-                (self.cookbook.n_kinds+1 + int(neural_agent_num) + int(det_agent_num) - 1) + \
+                (self.cookbook.n_kinds+1 + int(neural_agent_num) + len(self.cookbook.det_agent_names) - 1) + \
                 self.cookbook.n_kinds + 4 + 1 # TODO dsleeps: For some reason this is off by 1
             self.observation_space = self.observation_space = spaces.Tuple((
                 spaces.Box(low=0, high=time_limit,
@@ -393,14 +398,14 @@ class CraftWorldEnv(gym.Env):
         self.grid = copy.deepcopy(grid)
         # TODO dsleeps: Neural agent num does nothing, for now only support one agent
         self.neural_agent_num = int(neural_agent_num)
-        self.det_agent_num = int(det_agent_num)
+        self.det_agent_num = len(self.cookbook.det_agent_names)
 
         # The neural agents are first in the indices, then it's by the order of the list
         # The inventory object is shared across all agents, and each one knows its index
-        self.inventories = np.zeros((int(neural_agent_num) + int(det_agent_num), self.cookbook.n_kinds))
+        self.inventories = np.zeros((self.neural_agent_num + self.det_agent_num, self.cookbook.n_kinds))
 
         self.workshop_outs = np.zeros(self.cookbook.n_kinds)#NOTE czw check
-        self.approaching = [[]] * (int(neural_agent_num) + int(det_agent_num)) #NOTE czw check 
+        self.approaching = [[]] * (self.neural_agent_num + self.det_agent_num) #NOTE czw check 
         
         # Create the agents
         self.load((grid, init_pos, init_dir), False)
@@ -421,20 +426,22 @@ class CraftWorldEnv(gym.Env):
             init_dir = [init_dir]
 
         self.neural_agent = Agent.NeuralAgent(init_pos[0], init_dir[0], 
-                                              self.inventories[0], 0, 'Agent_0_',
+                                              self.inventories[0], 0, 'Neural_Agent_',
                                               self._formulas[0], 
                                               self.bas[0])
         
         self.det_agents = []
+        initial_i = 1
         i = 1
         while (len(init_pos) != i):
-            agent_type = np.random.choice(Agent.AgentTypes)
+            agent_type = self.cookbook.det_agent_types[i - initial_i]
             if (agent_type == 'Random'):
                 self.det_agents.append(Agent.RandomAgent(init_pos[i], init_dir[i], self.inventories[i], i, 
-                                                        'Agent_' + str(i) + '_', False))
+                                                        self.cookbook.det_agent_names[i - initial_i] + "_", 
+                                                        False))
             elif (agent_type == 'Pickup'):
                 self.det_agents.append(Agent.PickupAgent(init_pos[i], init_dir[i], self.inventories[i], i, 
-                                                        'Agent_' + str(i) + '_', 
+                                                        self.cookbook.det_agent_names[i - initial_i] + "_", 
                                                         self._width, self._height, False))
             i += 1
         
@@ -443,16 +450,17 @@ class CraftWorldEnv(gym.Env):
         while (len(self.det_agents) < self.det_agent_num):
             r_pos = (np.random.randint(self._width), np.random.randint(self._height))
             if (self.get_item(r_pos[0], r_pos[1]) == 0):
-                # self.Actions - 1 ensures that I don't accidentally get a use action
-                agent_type = np.random.choice(Agent.AgentTypes)
+                agent_type = self.cookbook.det_agent_types[i - initial_i]
                 if (agent_type == 'Random'):
+                    # self.Actions - 1 ensures that I don't accidentally get a use action
                     self.det_agents.append( \
                          Agent.RandomAgent(r_pos, np.random.randint(len(self.Actions)-1), self.inventories[i], 
-                                           i, 'Agent_' + str(i) + '_', False))
+                                           i, self.cookbook.det_agent_names[i - initial_i] + "_", False))
                 elif (agent_type == 'Pickup'):
                     self.det_agents.append( \
                          Agent.PickupAgent(r_pos, np.random.randint(len(self.Actions)-1), self.inventories[i], 
-                                           i, 'Agent_' + str(i) + '_', self._width, self._height, False))
+                                           i, self.cookbook.det_agent_names[i - initial_i] + "_", 
+                                           self._width, self._height, False))
                 i += 1
         
         # A list combining the two
@@ -1028,7 +1036,6 @@ def sample_craft_env_each(args, width=7, height=7, env_data=None, env=None):
     else:
         return CraftWorldEnv([args.formula] * args.neural_agent_num, args.recipe_path,
                              init_pos, init_dir, grid, neural_agent_num=args.neural_agent_num,
-                             det_agent_num=args.det_agent_num,
                              width=width, height=height,
                              use_gui=args.use_gui,
                              is_headless=args.is_headless,
@@ -1241,8 +1248,8 @@ def one_hot(grid, n_features):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Craft world')
     args = parser.parse_args()
-    # args.recipe_path = ROOT_PATH + 'craft_recipes_basic.yaml'
-    args.recipe_path = ROOT_PATH + 'craft_recipes_basic_color.yaml'
+    args.recipe_path = ROOT_PATH + 'craft_recipes_basic.yaml'
+    # args.recipe_path = ROOT_PATH + 'craft_recipes_basic_color.yaml'
     args.num_steps = 20
     args.target_fps = 60
     args.use_gui = False

@@ -32,8 +32,6 @@ def get_args():
                         help='random seed (default: 1)')
     parser.add_argument('--env_name', default='CharStream',
                         help='environment to train on: CharStream | Craft')
-    parser.add_argument('--det_agent_num', default=0,
-                        help='number of deterministic agents in the evironment')
     parser.add_argument('--neural_agent_num', default=1,
                         help='number of neural agents in the evironment')
     parser.add_argument('--num_train_ltls', type=int, default=50,
