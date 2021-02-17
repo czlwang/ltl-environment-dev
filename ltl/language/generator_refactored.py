@@ -314,7 +314,7 @@ class SentenceGrammar(object):
         return sentences
 
 def gen_ltl_example():
-    grammar = SentenceGrammar('/storage/dsleeper/RL_Parser/ltl/ltl/worlds/craft_recipes_basic_color.yaml')
+    grammar = SentenceGrammar('/storage/dsleeper/RL_Parser/ltl/ltl/worlds/craft_recipes_basic.yaml')
     choices = defaultdict(list)
     node = TreeNode('S', grammar.grammar, grammar._prod)
     node.create_tree()
@@ -323,7 +323,7 @@ def gen_ltl_example():
     return str(ltl_node)
 
 if __name__ == '__main__':
-    grammar = SentenceGrammar('/storage/dsleeper/RL_Parser/ltl/ltl/worlds/craft_recipes_basic_color.yaml')
+    grammar = SentenceGrammar('/storage/dsleeper/RL_Parser/ltl/ltl/worlds/craft_recipes_basic.yaml')
     for i in range(10):
         node = TreeNode('S', grammar.grammar, grammar._prod)
         node.create_tree()

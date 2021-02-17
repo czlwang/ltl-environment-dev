@@ -168,9 +168,10 @@ def ltl_sampler(alphabets, env_name='',
         print('Generate {}th formula'.format(i))
         while True:
             # generate LTL formula (including its pair)
+            ltl = generate_ltl(cfg, env_name=env_name)
+            
             # NOTE: I'm generating ltl using my generator
-            # ltl = generate_ltl(cfg, env_name=env_name)
-            ltl = gen_ltl_example() 
+            # ltl = gen_ltl_example() 
             symbols = [s for s in ltl.split(' ') if s != ')' and s != '(']
             sym_alphabets = [s for s in symbols if s in alphabets]
             # restrict craft max symbols to be 6 since spot may slow down at 12

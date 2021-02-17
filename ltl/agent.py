@@ -165,6 +165,11 @@ class PickupAgent(RandomAgent):
         vector = (np.array(item_pos) - np.array(self.pos)) 
         vector = vector/(2 * np.linalg.norm(vector))
         
+        # I think NAN might be happening if the two are on top of eachother
+        if not (0.4 < np.linalg.norm(vector) < 0.6):
+            return (False, None)
+            
+
         # Now use ray marching to see if there is a path between
         # the agent and the item
         current_vector = vector
