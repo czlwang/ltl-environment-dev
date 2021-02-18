@@ -548,7 +548,9 @@ class CraftWorldEnv(gym.Env):
     def step(self, action, no_eval=False):
         if (type(action) != list):
             action = [action]
-        
+        if (np.min(self.grid) < 0):
+            print('dangnabbit')
+
         prev_inv = copy.deepcopy(self.inventories)
         prev_approaching = copy.deepcopy(self.approaching)
         prev_workshop_outs = copy.deepcopy(self.workshop_outs)
@@ -585,7 +587,7 @@ class CraftWorldEnv(gym.Env):
 
             if x in range(0, self._width) and y in range(0, self._height) and \
                not self.get_item(x, y) and not (x, y) in [a.pos for a in self.all_agents]:
-                agent.pos = (x, y)
+                agent.move(x, y, self.grid)
             # take `use` action
             if agent_action == self.actions.use:
                 success = False
@@ -602,9 +604,21 @@ class CraftWorldEnv(gym.Env):
                             thing == self.cookbook.stone_index):
                         continue
                     if thing in self.cookbook.grabbable_indices:
-                        agent.add_items(thing, self.grid)
-                        self.grid[nx, ny, thing] = 0
-                        success = True
+                        # If the item is on the position of an agent then take it  all of
+                        # the items from that agent
+                        if ((nx, ny) in [a.pos for a in self.all_agents]):
+                            agent_take = None
+                            for a in self.all_agents:
+                                if (a.pos == (nx, ny)):
+                                    agent_take = a
+                                    break
+                            for i, item in enumerate(agent_take.get_items()):
+                                agent.add_items(i, self.grid, item)
+                                agent_take.remove_items(i, self.grid, item)
+                        else:
+                            agent.add_items(thing, self.grid)
+                            self.grid[nx, ny, thing] = 0
+                            success = True
                     elif thing in self.cookbook.workshop_indices:
                         workshop = self.cookbook.index.get(thing)
                         for output, inputs in self.cookbook.recipes.items():
@@ -616,10 +630,10 @@ class CraftWorldEnv(gym.Env):
                                 if agent.get_items()[key] == 0 and self.workshop_outs[output] == 0:
                                     continue
                                 if agent.get_items()[key] >= inputs[key]:
-                                    agent.get_items()[key] -= inputs[key]
+                                    agent.remove_items(key, self.grid, inputs[key])
                                     self.workshop_outs[output] += 1
                                 elif self.workshop_outs[output] > 0:
-                                    agent.get_items()[key] += 1
+                                    agent.add_items(key, self.grid, 1)
                                     self.workshop_outs[output] -= 1
                             success = True
                     elif thing in self.cookbook.switch_indices:
@@ -631,7 +645,7 @@ class CraftWorldEnv(gym.Env):
                     elif thing == self.cookbook.water_index:
                         if agent.get_items()[self.cookbook.index["bridge"]] > 0:
                             self.grid[nx, ny, self.water_index] = 0
-                            agent.get_items()[self.cookbook.index["bridge"]] -= 1
+                            agent.remove_items(self.cookbook.index["bridge"], 1)
                     elif thing == self.cookbook.stone_index:
                         if agent.get_items()[self.cookbook.index["axe"]] > 0:
                             self.grid[nx, ny, self.stone_index] = 0
@@ -695,6 +709,7 @@ class CraftWorldEnv(gym.Env):
         
         # print(rewards)
         return self.feature(), reward, done, info
+        # return [[],[]], reward, done, info
     
     # Have to update this function for every element that isn't an "item"
     def get_item(self, x, y):
@@ -730,12 +745,12 @@ class CraftWorldEnv(gym.Env):
         # remember the current config
         current_ds = self.dist2items(agent)
         current_grid = copy.deepcopy(self.grid)
-        current_inventory = copy.deepcopy(agent.get_items())
+        current_inventories = copy.deepcopy(self.inventories)
         current_workshop_outs = copy.deepcopy(self.workshop_outs)
         current_approaching = copy.deepcopy(self.approaching[agent.inv_index])
         #print("current_aproaching", list(current_approaching))
-        current_pos = copy.deepcopy(agent.pos)
-        current_dir = copy.deepcopy(agent.dir)
+        current_positions = copy.deepcopy([a.pos for a in self.all_agents])
+        current_dirs = copy.deepcopy([a.dir for a in self.all_agents])
         for action in range(5):
             # take step
             actions = [5] * self.neural_agent_num
@@ -746,11 +761,20 @@ class CraftWorldEnv(gym.Env):
 
             # restore the current grid
             self.grid = copy.deepcopy(current_grid)
-            self.inventories[agent.inv_index] = copy.deepcopy(current_inventory)
+            self.inventories[:] = copy.deepcopy(current_inventories)
+            '''
+            if (sum(self.all_agents[2].get_items()) != 0):
+                print()
+                print('Inventories')
+                print(self.inventories)
+                print('Agent ' + str(self.all_agents[2].inv_index) + ': ' + str(self.all_agents[2].get_items()))
+                print()
+            '''
             self.workshop_outs = copy.deepcopy(current_workshop_outs)
             self.approaching[agent.inv_index] = copy.deepcopy(current_approaching)
-            agent.pos = copy.deepcopy(current_pos)
-            agent.dir = copy.deepcopy(current_dir)
+            for i, a in enumerate(self.all_agents):
+                a.pos = copy.deepcopy(current_positions[i])
+                a.dir = copy.deepcopy(current_dirs[i])
         ds = np.asarray(ds)
         return np.transpose(ds, (1, 0))
 

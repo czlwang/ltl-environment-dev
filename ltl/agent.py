@@ -25,7 +25,14 @@ class Agent:
     def move(self, x, y, grid=[], cookbook={}):
         padded = np.zeros(grid.shape[2])
         padded[:self.inventory.shape[0]] = self.inventory
-
+        '''
+        if (self.pred_str == "Move_"):
+            print(self.pred_str)
+            print(padded)
+            if (sum(self.inventory) != 0):
+                print(grid[:,:,np.argmax(self.inventory)])
+                print(self.pos)
+        '''
         # Remove the elements from the grid in agents inventory and add them to the new
         # position of the agent
         grid[self.pos[0],self.pos[1],:] -= padded
@@ -37,19 +44,42 @@ class Agent:
         return self.inventory
     
     def add_items(self, item_index, grid, count=1):
+        '''
+        if (self.pred_str == "Move_"):
+            print("Item: " + str(item_index))
+            print(count)
+            print(grid[:,:,item_index])
+            '''
         self.inventory[item_index] += count
         grid[self.pos[0], self.pos[1], item_index] += count
+        '''
+        if (self.pred_str == "Move_"):
+            print(grid[:, :, item_index])
+            print(self.pos)
+            '''
     
-    def remove_items(self, item_index, count=1):
-        self.inventory[item_index] = max(0, self.inventory[item_index] - count)
+    def remove_items(self, item_index, grid, count=1):
+        self.inventory[item_index] = max(0, self.inventory[item_index] - abs(count))
+        grid[self.pos[0], self.pos[1], item_index] -= count
     
-    def clear_inventory(self):
+    def clear_inventory(self, grid=[]):
+        if (grid == []):
+            self.inventory[:] = 0
+            return
+            
+        padded = np.zeros(grid.shape[2])
+        padded[:self.inventory.shape[0]] = self.inventory
+
+        # Remove the elements from the grid in agents inventory and add them to the new
+        # position of the agent
+        grid[self.pos[0],self.pos[1],:] -= padded
         self.inventory[:] = 0
 
     def reset(self):
         self.pos = copy.deepcopy(self._init_pos)
         self.dir = copy.deepcopy(self._init_dir)
         self.clear_inventory()
+        # print('reset')
 
 # An agent to be used as a container for agents driven by a neural network
 class NeuralAgent(Agent):
@@ -70,6 +100,7 @@ class NeuralAgent(Agent):
         self.seq = []
         self.state_visit_count = 0
         self.last_states = set(self.ba.get_initial_state())
+        super().reset()
 
 # An agent that just takes random actions
 class RandomAgent(Agent):
