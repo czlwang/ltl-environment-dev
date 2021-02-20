@@ -6,7 +6,7 @@ AgentTypes = ['Random',  'Pickup']
 
 class Agent:
     
-    def __init__(self, init_pos, init_dir, inventory, inv_index, pred_str, is_neural=False):
+    def __init__(self, init_pos, init_dir, inventory, inv_index, pred_str, env, is_neural=False):
         self._init_pos = init_pos
         self._init_dir = init_dir
         self.is_neural = is_neural
@@ -14,78 +14,60 @@ class Agent:
 
         # The row of corresponding to the index of this agent in the inventory matrix
         self.inv_index = inv_index
-        
         self.pred_str = pred_str
+        self.env = env
+        
         self.pos = copy.deepcopy(init_pos)
         self.dir = copy.deepcopy(init_dir)
     
-    def take_action(self, grid=[], cookbook={}):
+    def take_action(self):
         pass
     
-    def move(self, x, y, grid=[], cookbook={}):
-        padded = np.zeros(grid.shape[2])
+    def move(self, x, y):
+        padded = np.zeros(self.env.grid.shape[2])
         padded[:self.inventory.shape[0]] = self.inventory
-        '''
-        if (self.pred_str == "Move_"):
-            print(self.pred_str)
-            print(padded)
-            if (sum(self.inventory) != 0):
-                print(grid[:,:,np.argmax(self.inventory)])
-                print(self.pos)
-        '''
+        
         # Remove the elements from the grid in agents inventory and add them to the new
         # position of the agent
-        grid[self.pos[0],self.pos[1],:] -= padded
-        grid[x,y,:] += padded
+        self.env.grid[self.pos[0],self.pos[1],:] -= padded
+        self.env.grid[x,y,:] += padded
 
         self.pos = (x, y)
 
     def get_items(self):
         return self.inventory
     
-    def add_items(self, item_index, grid, count=1):
-        '''
-        if (self.pred_str == "Move_"):
-            print("Item: " + str(item_index))
-            print(count)
-            print(grid[:,:,item_index])
-            '''
+    def add_items(self, item_index, count=1):
         self.inventory[item_index] += count
-        grid[self.pos[0], self.pos[1], item_index] += count
-        '''
-        if (self.pred_str == "Move_"):
-            print(grid[:, :, item_index])
-            print(self.pos)
-            '''
+        self.env.grid[self.pos[0], self.pos[1], item_index] += count
     
-    def remove_items(self, item_index, grid, count=1):
+    def remove_items(self, item_index, count=1):
         self.inventory[item_index] = max(0, self.inventory[item_index] - abs(count))
-        grid[self.pos[0], self.pos[1], item_index] -= count
+        self.env.grid[self.pos[0], self.pos[1], item_index] -= count
     
-    def clear_inventory(self, grid=[]):
-        if (grid == []):
+    def clear_inventory(self, ignore_grid=False):
+        if (ignore_grid):
             self.inventory[:] = 0
             return
             
-        padded = np.zeros(grid.shape[2])
+        padded = np.zeros(self.env.grid.shape[2])
         padded[:self.inventory.shape[0]] = self.inventory
 
         # Remove the elements from the grid in agents inventory and add them to the new
         # position of the agent
-        grid[self.pos[0],self.pos[1],:] -= padded
+        self.env.grid[self.pos[0],self.pos[1],:] -= padded
         self.inventory[:] = 0
 
     def reset(self):
         self.pos = copy.deepcopy(self._init_pos)
         self.dir = copy.deepcopy(self._init_dir)
         self.clear_inventory()
-        # print('reset')
 
 # An agent to be used as a container for agents driven by a neural network
 class NeuralAgent(Agent):
     
-    def __init__(self, init_pos, init_dir, inventory, inv_index, pred_str, formula, ba):
-        super().__init__(init_pos, init_dir, inventory, inv_index, pred_str, True)
+    def __init__(self, init_pos, init_dir, inventory, inv_index, pred_str, env, formula, ba):
+        super().__init__(init_pos, init_dir, inventory, inv_index, pred_str, env, True)
         self.formula = formula
         self.ba = ba
 
@@ -93,7 +75,7 @@ class NeuralAgent(Agent):
         self.state_visit_count = 0
         self.last_states = set(ba.get_initial_state())
 
-    def take_action(self, grid=None, cookbook=None):
+    def take_action(self):
         print('This should not be called for a neural agent')
 
     def reset(self):
@@ -105,10 +87,10 @@ class NeuralAgent(Agent):
 # An agent that just takes random actions
 class RandomAgent(Agent):
     
-    def __init__(self, init_pos, init_dir, inventory, inv_index, pred_str, is_neural=False):
-        super().__init__(init_pos, init_dir, inventory, inv_index, pred_str, False)
+    def __init__(self, init_pos, init_dir, inventory, inv_index, pred_str, env, is_neural=False):
+        super().__init__(init_pos, init_dir, inventory, inv_index, pred_str, env, False)
 
-    def take_action(self, grid=None, cookbook=None):
+    def take_action(self):
         action = np.random.choice(list(world.CraftWorldEnv.Actions))
         return action
 
@@ -116,8 +98,8 @@ class RandomAgent(Agent):
 class PickupAgent(RandomAgent):
 
     def __init__(self, init_pos, init_dir, inventory, inv_index, 
-                 pred_str, grid_width, grid_height, is_neural=False):
-        super().__init__(init_pos, init_dir, inventory, inv_index, pred_str, False)
+                 pred_str, env, is_neural=False):
+        super().__init__(init_pos, init_dir, inventory, inv_index, pred_str, env, False)
         
         # Keeps track of whether or not this agent is holding an item
         self.has_item = False
@@ -129,9 +111,9 @@ class PickupAgent(RandomAgent):
 
         # The probability distribution over the whole grid
         # This is used to discourage the agent from going back to the same place
-        self.prob_grid = np.array([[1.] * grid_width] * grid_height)
-        self.grid_width_ = grid_width
-        self.grid_height_ = grid_height
+        self.prob_grid = np.array([[1.] * env.grid.shape[0]] * env.grid.shape[1])
+        self.grid_width_ = env.grid.shape[0]
+        self.grid_height_ = env.grid.shape[1]
 
         # The factor the reduce the probabilities by
         self.decay = 0.5
@@ -143,14 +125,14 @@ class PickupAgent(RandomAgent):
                               (0,1): int(world.CraftWorldEnv.Actions.up),
                               (0,0): int(world.CraftWorldEnv.Actions.nothing)}
 
-    def take_action(self, grid=None, cookbook=None):
+    def take_action(self):
         # If the agent had an item then doesn't, it means that another agent has taken it
         if (self.has_item and np.sum(self.get_items()) == 0):
             self.has_item = False
             self.item_taken = True
 
         # When the agent has an item already just move around randomly
-        if (type(grid) != type(np.array([]))  or cookbook == None or self.has_item or self.item_taken):
+        if (self.has_item or self.item_taken):
             return super().take_action()
         
         # First find the available spaces
@@ -162,7 +144,7 @@ class PickupAgent(RandomAgent):
 
                 x = min(self.grid_width_ - 1, max(0, x_off+self.pos[0]))
                 y = min(self.grid_height_ - 1, max(0, y_off+self.pos[1]))
-                item = self.get_item(x, y, grid, cookbook)
+                item = self.env.get_item(x, y)
                 if (item == 0):
                     spaces.add((x, y, self.del2direction[x_off, y_off]))
                 else:
@@ -171,15 +153,15 @@ class PickupAgent(RandomAgent):
                     return world.CraftWorldEnv.Actions.use
         
         # Check if there are any items in the agent's line of sight
-        items = cookbook.grabbable_indices
+        items = self.env.cookbook.grabbable_indices
         for item in items:
-            item_grid = grid[:,:,item]
+            item_grid = self.env.grid[:,:,item]
             item_pos = np.array(np.where(item_grid == 1)).T
             for pos in item_pos:
                 if (len(pos) == 0):
                     continue
                 
-                hit_item, action = self.cast_ray(pos, grid, cookbook)
+                hit_item, action = self.cast_ray(pos)
                 if (hit_item):
                     return action
 
@@ -194,17 +176,9 @@ class PickupAgent(RandomAgent):
         self.prob_grid[space[0]][space[1]] *= self.decay
     
         return space[2]
-
-    # NOTE: Will need to update if you add something else that can be moved through
-    def get_item(self, x, y, grid, cookbook):
-        item_indices = np.where(grid[x, y, :] == 1)
-        for i in item_indices[0]:
-            if not i in cookbook.color_indices:
-                return i     
-        return 0
     
     # Returns whether or not there exists a valid path and the first direction to move in
-    def cast_ray(self, item_pos, grid, cookbook):
+    def cast_ray(self, item_pos):
         vector = (np.array(item_pos) - np.array(self.pos)) 
         vector = vector/(2 * np.linalg.norm(vector))
         
@@ -243,8 +217,8 @@ class PickupAgent(RandomAgent):
 
             # I check two items to ensure that the path is clear along the diagonal
             # if the ray moves diagonally
-            item_1 = self.get_item(x, y, grid, cookbook)
-            item_2 = self.get_item(x - dx, y - dy, grid, cookbook)
+            item_1 = self.env.get_item(x, y)
+            item_2 = self.env.get_item(x - dx, y - dy)
             if (item_1 != 0 or item_2 != 0):
                 return (False, None)
             

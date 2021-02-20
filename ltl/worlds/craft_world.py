@@ -409,7 +409,7 @@ class CraftWorldEnv(gym.Env):
             init_dir = [init_dir]
 
         self.neural_agent = Agent.NeuralAgent(init_pos[0], init_dir[0], 
-                                              self.inventories[0], 0, 'Neural_Agent_',
+                                              self.inventories[0], 0, 'Neural_Agent_', self,
                                               self._formulas[0], 
                                               self.bas[0])
         
@@ -421,11 +421,11 @@ class CraftWorldEnv(gym.Env):
             if (agent_type == 'Random'):
                 self.det_agents.append(Agent.RandomAgent(init_pos[i], init_dir[i], self.inventories[i], i, 
                                                         self.cookbook.det_agent_names[i - initial_i] + "_", 
-                                                        False))
+                                                        self, False))
             elif (agent_type == 'Pickup'):
                 self.det_agents.append(Agent.PickupAgent(init_pos[i], init_dir[i], self.inventories[i], i, 
                                                         self.cookbook.det_agent_names[i - initial_i] + "_", 
-                                                        self._width, self._height, False))
+                                                        self, False))
             i += 1
         
         # If positions haven't been specified for all of the non-neural agents
@@ -438,12 +438,12 @@ class CraftWorldEnv(gym.Env):
                     # self.Actions - 1 ensures that I don't accidentally get a use action
                     self.det_agents.append( \
                          Agent.RandomAgent(r_pos, np.random.randint(len(self.Actions)-1), self.inventories[i], 
-                                           i, self.cookbook.det_agent_names[i - initial_i] + "_", False))
+                                           i, self.cookbook.det_agent_names[i - initial_i] + "_", self, False))
                 elif (agent_type == 'Pickup'):
                     self.det_agents.append( \
                          Agent.PickupAgent(r_pos, np.random.randint(len(self.Actions)-1), self.inventories[i], 
                                            i, self.cookbook.det_agent_names[i - initial_i] + "_", 
-                                           self._width, self._height, False))
+                                           self, False))
                 i += 1
         
         # A list combining the two
@@ -548,8 +548,6 @@ class CraftWorldEnv(gym.Env):
     def step(self, action, no_eval=False):
         if (type(action) != list):
             action = [action]
-        if (np.min(self.grid) < 0):
-            print('dangnabbit')
 
         prev_inv = copy.deepcopy(self.inventories)
         prev_approaching = copy.deepcopy(self.approaching)
@@ -560,7 +558,7 @@ class CraftWorldEnv(gym.Env):
             if (agent.is_neural):
                 agent_action = action[i]
             else:
-                agent_action = agent.take_action(self.grid, self.cookbook)
+                agent_action = agent.take_action()
             n_dir = agent_action
 
             if agent_action == self.actions.left:
@@ -587,7 +585,7 @@ class CraftWorldEnv(gym.Env):
 
             if x in range(0, self._width) and y in range(0, self._height) and \
                not self.get_item(x, y) and not (x, y) in [a.pos for a in self.all_agents]:
-                agent.move(x, y, self.grid)
+                agent.move(x, y)
             # take `use` action
             if agent_action == self.actions.use:
                 success = False
@@ -613,10 +611,10 @@ class CraftWorldEnv(gym.Env):
                                     agent_take = a
                                     break
                             for i, item in enumerate(agent_take.get_items()):
-                                agent.add_items(i, self.grid, item)
-                                agent_take.remove_items(i, self.grid, item)
+                                agent.add_items(i, item)
+                                agent_take.remove_items(i, item)
                         else:
-                            agent.add_items(thing, self.grid)
+                            agent.add_items(thing)
                             self.grid[nx, ny, thing] = 0
                             success = True
                     elif thing in self.cookbook.workshop_indices:
@@ -630,10 +628,10 @@ class CraftWorldEnv(gym.Env):
                                 if agent.get_items()[key] == 0 and self.workshop_outs[output] == 0:
                                     continue
                                 if agent.get_items()[key] >= inputs[key]:
-                                    agent.remove_items(key, self.grid, inputs[key])
+                                    agent.remove_items(key, inputs[key])
                                     self.workshop_outs[output] += 1
                                 elif self.workshop_outs[output] > 0:
-                                    agent.add_items(key, self.grid, 1)
+                                    agent.add_items(key, 1)
                                     self.workshop_outs[output] -= 1
                             success = True
                     elif thing in self.cookbook.switch_indices:
