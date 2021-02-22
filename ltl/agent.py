@@ -126,7 +126,7 @@ class PickupAgent(RandomAgent):
                               (0,0): int(world.CraftWorldEnv.Actions.nothing)}
     
     def reset(self):
-        self.prob_grid = np.array([[1.] * env.grid.shape[0]] * env.grid.shape[1])
+        self.prob_grid = np.array([[1.] * self.env.grid.shape[0]] * self.env.grid.shape[1])
         self.has_item = False
         super().reset()
 
