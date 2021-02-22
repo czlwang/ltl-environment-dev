@@ -124,6 +124,11 @@ class PickupAgent(RandomAgent):
                               (0,-1): int(world.CraftWorldEnv.Actions.down),
                               (0,1): int(world.CraftWorldEnv.Actions.up),
                               (0,0): int(world.CraftWorldEnv.Actions.nothing)}
+    
+    def reset(self):
+        self.prob_grid = np.array([[1.] * env.grid.shape[0]] * env.grid.shape[1])
+        self.has_item = False
+        super().reset()
 
     def take_action(self):
         # If the agent had an item then doesn't, it means that another agent has taken it
